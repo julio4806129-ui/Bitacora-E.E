@@ -1,0 +1,15 @@
+ID,Fecha,Bus Móvil,Patio,Tipo de Mantenimiento,Observaciones
+14,2026-09-17 18:08:51.024296+00:00,1342,La Cabima,REVISION POR BITACORA,
+13,2026-09-17 18:07:34.751734+00:00,1450,La Cabima,REVISION POR BITACORA,
+12,2026-09-17 18:00:39.710632+00:00,1601,La Cabima,REVISION POR BITACORA,
+11,2026-09-17 17:31:51.033254+00:00,2000,Patio Curundu,REVISION POR BITACORA,
+10,2026-09-17 17:31:51.022302+00:00,2010,Patio Curundu,REVISION POR BITACORA,
+9,2026-09-17 17:31:51.008572+00:00,2020,Patio Curundu,REVISION POR BITACORA,
+8,2026-09-17 17:31:50.996377+00:00,2030,Patio Curundu,REVISION POR BITACORA,
+7,2026-09-17 17:31:50.974920+00:00,2040,Patio Curundu,REVISION POR BITACORA,
+6,2026-09-17 17:31:50.969164+00:00,2050,Patio Curundu,REVISION POR BITACORA,
+5,2026-09-17 16:04:11.906086+00:00,105,Patio Norte,Preventivo,"Revision de rutina bus 105, estado general operativo."
+4,2026-09-17 16:04:11.890341+00:00,104,Patio Norte,Correctivo,"Revision de rutina bus 104, estado general operativo."
+3,2026-09-17 16:04:11.876069+00:00,103,Patio Norte,Preventivo,"Revision de rutina bus 103, estado general operativo."
+2,2026-09-17 16:04:11.859689+00:00,102,Patio Norte,Correctivo,"Revision de rutina bus 102, estado general operativo."
+1,2026-09-17 16:04:11.847454+00:00,101,Patio Norte,Preventivo,"Revision de rutina bus 101, estado general operativo."

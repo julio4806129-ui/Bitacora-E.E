@@ -1,0 +1,2178 @@
+appsscript.json
+
+{
+  "timeZone": "America/Panama",
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8",
+  "dependencies": {},
+  "webapp": {
+    "executeAs": "USER_DEPLOYING",
+    "access": "ANYONE_ANONYMOUS"
+  }
+}
+
+Code.gs
+
+// --- CONFIGURACIÓN GLOBAL ---
+const ADMIN_CODES = ['13283', '10844', '9335', '12517', '12505']; // Códigos de Administrador
+const SS = SpreadsheetApp.getActiveSpreadsheet();
+const TIME_ZONE = Session.getScriptTimeZone(); // Obtiene la zona horaria del script
+
+// =============================================================
+// FUNCIÓN PRINCIPAL
+// =============================================================
+
+function doGet() {
+  return HtmlService.createTemplateFromFile("Index") // Correcto: carga Index.html como plantilla
+    .evaluate()                                   // Correcto: procesa las etiquetas de plantilla
+    .setTitle("BITACORA E.E - MiBus")
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+function include(filename) {
+  return HtmlService.createHtmlOutputFromFile(filename).getContent();
+}
+
+
+// =============================================================
+// GESTIÓN DE USUARIOS Y AUTENTICACIÓN
+// =============================================================
+
+// --- MODIFICACIÓN EN FUNCIÓN EXISTENTE EN CODE.GS ---
+// --- MODIFICACIÓN DE LA FUNCIÓN EXISTENTE getUserInfo en CODE.GS ---
+function getUserInfo(codigo) {
+  const usuarios = getUsuariosMap(); // Esta función ya la tienes en tu Code.gs
+  const nombre = usuarios[String(codigo).trim()];
+  if (nombre) {
+    const cuota = getCuotaDiaria(codigo); // <--- Llama a la nueva función aquí
+    return {
+      nombre: nombre,
+      isAdmin: ADMIN_CODES.includes(String(codigo).trim()),
+      cuotaDiaria: cuota // <--- AÑADE ESTA LÍNEA para enviar la cuota al frontend
+    };
+  }
+  return null;
+}
+function obtenerDatosUsuarios() {
+  const sheet = SS.getSheetByName("Usuarios");
+  if (!sheet) {
+    Logger.log("ERROR: La hoja 'Usuarios' no fue encontrada.");
+    return [];
+  }
+  const data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return []; // Retorna vacío si solo hay encabezado o no hay datos
+  data.shift(); // Elimina la fila de encabezado
+  return data.map(row => ({ codigo: String(row[0]).trim(), nombre: String(row[1]).trim(), cuota: String(row[2]).trim() }));
+}
+
+function agregarUsuario(userData) {
+  try {
+    const sheet = SS.getSheetByName("Usuarios");
+    if (!sheet) throw new Error("La hoja 'Usuarios' no existe.");
+
+    // Verifica si el código ya existe para evitar duplicados
+    const existingCodes = sheet.getRange("A:A").getValues().flat().map(String);
+    if (existingCodes.includes(String(userData.codigo).trim())) {
+      return { status: "error", message: `El código ${userData.codigo} ya existe.` };
+    }
+
+    sheet.appendRow([String(userData.codigo).trim(), String(userData.nombre).trim()]);
+    return { status: "success", message: "Usuario agregado correctamente." };
+  } catch (e) {
+    Logger.log(`Error al agregar usuario: ${e.message}`);
+    return { status: "error", message: `Error en el servidor al agregar usuario: ${e.message}` };
+  }
+}
+
+function editarUsuario(userData) {
+  try {
+    const sheet = SS.getSheetByName("Usuarios");
+    if (!sheet) throw new Error("La hoja 'Usuarios' no existe.");
+
+    const data = sheet.getDataRange().getValues();
+    // Encuentra la fila del usuario por código (ignorando el encabezado)
+    const rowIndex = data.findIndex((row, index) => index > 0 && String(row[0]).trim() === String(userData.codigo).trim());
+    
+    if (rowIndex > -1) {
+      // rowIndex + 1 porque getDataRange() es 0-indexado, pero getRange() es 1-indexado
+      // La columna 2 es para el nombre
+      sheet.getRange(rowIndex + 1, 2).setValue(String(userData.nombre).trim());
+      return { status: "success", message: "Usuario actualizado correctamente." };
+    }
+    return { status: "error", message: "Usuario no encontrado." };
+  } catch (e) {
+    Logger.log(`Error al editar usuario: ${e.message}`);
+    return { status: "error", message: `Error en el servidor al editar usuario: ${e.message}` };
+  }
+}
+
+function eliminarUsuario(codigo) {
+  try {
+    const sheet = SS.getSheetByName("Usuarios");
+    if (!sheet) throw new Error("La hoja 'Usuarios' no existe.");
+
+    const data = sheet.getDataRange().getValues();
+    // Encuentra la fila del usuario por código (ignorando el encabezado)
+    const rowIndex = data.findIndex((row, index) => index > 0 && String(row[0]).trim() === String(codigo).trim());
+
+    if (rowIndex > -1) {
+      // rowIndex + 1 es la fila real en la hoja
+      sheet.deleteRow(rowIndex + 1);
+      return { status: "success", message: "Usuario eliminado correctamente." };
+    }
+    return { status: "error", message: "Usuario no encontrado." };
+  } catch (e) {
+    Logger.log(`Error al eliminar usuario: ${e.message}`);
+    return { status: "error", message: `Error en el servidor al eliminar usuario: ${e.message}` };
+  }
+}
+
+
+// =============================================================
+// LÓGICA DE BITÁCORA Y ATENCIÓN
+// =============================================================
+
+function guardarBitacoraYAtender(formData) {
+  try {
+    const tecnicoNombre = formData.tecnico;
+    const tecnicoCodigo = Object.keys(getUsuariosMap()).find(key => getUsuariosMap()[key] === tecnicoNombre);
+
+    guardarRegistroEnBitacora(formData, tecnicoCodigo); // Registrar en Bitácora
+
+    // Procesar según la fuente
+    if (formData.source === 'reportes') {
+      atenderMovilDeReportes(formData.reportId, tecnicoCodigo);
+    } else if (formData.source === 'inventario') {
+      // No se hace nada adicional: no se borra, no se mueve, no se actualiza fecha
+      // Solo ya se guardó en Bitácora arriba
+    }
+
+    return { status: "success", message: "Bitácora guardada y móvil atendido." };
+  } catch (e) {
+    Logger.log(`Error en guardarBitacoraYAtender: ${e.message}`);
+    return { status: "error", message: `Error en el servidor: ${e.message}` };
+  }
+}
+
+
+function guardarRegistroEnBitacora(formData, tecnicoCodigo) {
+  let bitacoraSheet = SS.getSheetByName("RepuestasForms");
+  if (!bitacoraSheet) {
+    bitacoraSheet = SS.insertSheet("RepuestasForms");
+    bitacoraSheet.appendRow([
+      "Marca temporal", "NUMERO DE BUS", "TIPO DE MANTENIMIENTO", "PATIO", 
+      "PERSONAL TECNICO", "MODEM", "ACTUALIZACION FW", "BOCINA", "BOCINA ADECUACION", "BOCINA/CARCASA", "BOCINA/REGULADOR", "BOTON DE LLAMADA", "BOTON DE PANICO", 
+      "SIMCARD", "SERIE SIMCARD", "IMEI BUSAE", "ANILLO", "CTAP", "SERIE CTAP", 
+      "RESPUESTA TECNICA", "CODIGO TECNICO"
+    ]);
+  }
+  
+  const timestamp = new Date();
+  bitacoraSheet.appendRow([
+    timestamp,
+    String(formData.movil || '').trim(),
+    String(formData.tipoInventario || '').trim(),
+    String(formData.patio || '').trim(),
+    String(formData.tecnico || '').trim(), // Nombre del técnico
+    String(formData.modem || '').trim(),
+    String(formData.modemA || '').trim(),
+    String(formData.bocina || '').trim(),
+    String(formData.bocinaA || '').trim(),
+    String(formData.bocinaC || '').trim(),
+    String(formData.bocinaR || '').trim(),
+    String(formData.botonLlamada || '').trim(),
+    String(formData.botonPanico || '').trim(),
+    String(formData.simCard || '').trim(),
+    String(formData.serieSim || '').trim(),
+    String(formData.imei || '').trim(),
+    String(formData.anillo || '').trim(),
+    String(formData.ctap || '').trim(),
+    String(formData.serieCtap || '').trim(),
+    String(formData.respuestaTecnica || '').trim(),
+    String(tecnicoCodigo || '').trim() // Código del técnico
+  ]);
+  Logger.log("Registro guardado en Bitácora.");
+}
+
+function atenderMovilDeReportes(reportId, tecnicoCodigo) {
+  if (!reportId || !tecnicoCodigo) {
+    throw new Error("Parámetros inválidos: reportId y tecnicoCodigo son requeridos.");
+  }
+
+  const reportesSheet = SS.getSheetByName("Reportes");
+  if (!reportesSheet) throw new Error("La hoja 'Reportes' no existe.");
+
+  let historialSheet = SS.getSheetByName("Historial");
+  if (!historialSheet) {
+    historialSheet = SS.insertSheet("Historial");
+    historialSheet.appendRow([
+      "Fecha y Hora Atención", "Móvil", "Estado GPS", "Patio",
+      "Fecha Reporte", "Hora Reporte", "Diagnóstico",
+      "Técnico Nombre", "Técnico Código"
+    ]);
+  }
+
+  const data = reportesSheet.getDataRange().getValues();
+  const headers = data[0];
+  const estadoColIndex = headers.indexOf("Estado");
+  if (estadoColIndex === -1) throw new Error("No se encontró la columna 'Estado' en Reportes.");
+
+  const usuariosMap = getUsuariosMap();
+
+  // Buscar fila con el reportId y que no esté atendida
+  const rowIndex = data.findIndex((row, idx) =>
+    idx > 0 &&
+    String(row[6]).trim() === String(reportId).trim() &&
+    String(row[estadoColIndex]).toLowerCase() !== "atendido"
+  );
+
+  if (rowIndex === -1) {
+    throw new Error("El reporte no fue encontrado o ya fue atendido.");
+  }
+
+  const reportRowData = data[rowIndex];
+  const nombreTecnico = usuariosMap[String(tecnicoCodigo).trim()] || "Desconocido";
+
+  // Calcular fila real (porque rowIndex incluye el encabezado como índice 0)
+  const filaReal = rowIndex + 1;
+
+  // 1. Marcar como atendido antes de mover
+  reportesSheet.getRange(filaReal, estadoColIndex + 1).setValue("Atendido");
+
+  // 2. Construir entrada para Historial
+  const historialEntry = [
+    new Date(),                          // Fecha y Hora Atención
+    String(reportRowData[0] || '').trim(), // Móvil
+    String(reportRowData[1] || '').trim(), // Estado GPS
+    String(reportRowData[2] || '').trim(), // Patio
+    reportRowData[3],                    // Fecha Reporte
+    reportRowData[4],                    // Hora Reporte
+    String(reportRowData[5] || '').trim(), // Diagnóstico
+    nombreTecnico,                       // Técnico Nombre
+    String(tecnicoCodigo || '').trim()   // Técnico Código
+  ];
+
+  // 3. Insertar en Historial
+  historialSheet.appendRow(historialEntry);
+
+  // 4. Borrar la fila original en Reportes
+  reportesSheet.deleteRow(filaReal);
+}
+
+
+// =============================================================
+// OBTENCIÓN DE DATOS PARA LAS SECCIONES
+// =============================================================
+
+function obtenerDatosDeReportes() {
+  const sheet = SS.getSheetByName("Reportes");
+  if (!sheet) {
+    Logger.log("ERROR: La hoja 'Reportes' no fue encontrada.");
+    return [];
+  }
+  // Asume que los datos comienzan en la fila 3 (después de 2 filas de encabezado)
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+
+  // Si no hay encabezados o datos después de la fila 2, retorna vacío
+  if (lastRow < 3 || lastCol === 0) return []; 
+
+  const dataRange = sheet.getRange(3, 1, lastRow - 2, lastCol);
+  const data = dataRange.getValues();
+  const reportIdColIndex = 6; // Columna G (0-indexed) para ReportID
+
+  // Iterate and ensure each row has a UUID. If not, generate and set it.
+  const updatedData = data.map((row, i) => {
+    let reportId = String(row[reportIdColIndex] || '').trim();
+    if (!reportId) {
+      reportId = Utilities.getUuid(); // Generate UUID
+      // Update the sheet directly for the new UUID
+      sheet.getRange(i + 3, reportIdColIndex + 1).setValue(reportId); // i+3 for 1-indexed row, reportIdColIndex+1 for 1-indexed column
+    }
+    // Return row data including the (potentially new) reportId
+    // Ensure the array has enough elements to include the ReportID column, even if it was empty initially.
+    const fullRow = [...row];
+    fullRow[reportIdColIndex] = reportId; // Place the reportId at the correct index
+    
+    // Convert all relevant cells to string for consistency in client-side filtering/display
+    return fullRow.map(cell => String(cell || '').trim()); 
+  });
+  
+  // Return the processed data. The client-side will now expect 7 columns (0-6) + ReportID
+  // We'll pass the ReportID as a separate item at the end of each row array
+  // so client can access it easily.
+  return updatedData.map(row => [...row.slice(0, 6), row[reportIdColIndex]]); // Return columns A-F + ReportID
+}
+
+function obtenerDatosDeInventario() {
+  const sheet = SS.getSheetByName("Inventario");
+  if (!sheet) {
+    Logger.log("ERROR: La hoja 'Inventario' no fue encontrada.");
+    return [];
+  }
+  // Asume que los datos del inventario comienzan en la fila 2 (después de 1 fila de encabezado)
+  const lastRow = sheet.getLastRow();
+  const lastCol = sheet.getLastColumn();
+
+  if (lastRow < 3 || lastCol === 0) return []; // No hay datos válidos
+
+  // Rango de datos: desde la fila 2 hasta la última fila, todas las columnas
+  const data = sheet.getRange(3, 1, lastRow - 1, lastCol).getValues();
+  
+  // Retorna los datos como cadenas, formateando las fechas
+  return data.map(row => {
+    // Patio, Móvil, Estado, Última Atención (index 3), Fecha Actual (index 4), Diagnóstico
+    const ultimaAtencion = row[4];
+    const fechaActual = row[5];
+
+    // Formatear las fechas a 'dd/mm/yyyy' si son objetos Date
+    const formattedUltimaAtencion = (ultimaAtencion instanceof Date) ? Utilities.formatDate(ultimaAtencion, TIME_ZONE, "dd/MM/yyyy") : String(ultimaAtencion || '').trim();
+    const formattedFechaActual = (fechaActual instanceof Date) ? Utilities.formatDate(fechaActual, TIME_ZONE, "dd/MM/yyyy") : String(fechaActual || '').trim();
+
+    return [
+      String(row[0] || '').trim(), // Patio
+      String(row[1] || '').trim(), // Móvil
+      String(row[2] || '').trim(), // Hora
+      String(row[3] || '').trim(), // Estado
+      formattedUltimaAtencion,     // Última Atención (formateada)
+      formattedFechaActual,        // Fecha Actual (formateada)
+      String(row[6] || '').trim()  // Diagnóstico
+    ];
+  });
+}
+
+function obtenerDatosDeResumen(filtros) {
+  const resumenSheet = SS.getSheetByName("Resumen");
+  if (!resumenSheet) return { error: "Hoja Resumen no encontrada." };
+
+  let fechaInicioParaHoja = null;
+  if (filtros.fechaInicio) {
+    fechaInicioParaHoja = new Date(filtros.fechaInicio + 'T12:00:00'); 
+  }
+
+  // Escribir los valores de los filtros en las celdas correspondientes.
+  resumenSheet.getRange("A1").setValue(fechaInicioParaHoja);
+
+  // 2. Dar tiempo a que las fórmulas QUERY se recalcuen
+  SpreadsheetApp.flush(); // Fuerza a Apps Script a aplicar los cambios y recalcular fórmulas
+
+  // 3. Leer los resultados de las tablas generadas por QUERY
+  const tiposMantenimiento = resumenSheet.getRange("A21:H25").getValues().filter(r => r[0] !== '');
+  const atencionesPorPatio = resumenSheet.getRange("A27:H33").getValues().filter(r => r[0] !== '');
+  const atencionesPorTecnico = resumenSheet.getRange("A3:H19").getValues().filter(r => r[0] !== '');
+  const estadoModem = resumenSheet.getRange("A35:H42").getValues().filter(r => r[0] !== '');
+
+  return {
+    tiposMantenimiento: tiposMantenimiento,
+    atencionesPorPatio: atencionesPorPatio,
+    atencionesPorTecnico: atencionesPorTecnico,
+    estadoModem: estadoModem
+  };
+}
+
+// =============================================================
+// NUEVAS FUNCIONES PARA RESUMEN DE EQUIPOS
+// =============================================================
+
+function getResumenEquiposTablesData() {
+  const resumenEquiposSheet = SS.getSheetByName("Resumen de equipos");
+  if (!resumenEquiposSheet) {
+    console.error("La hoja 'Resumen de equipos' no se encontró.");
+    return {
+      estadoFlota: [],
+      bocinasDañadas: [],
+      estadoModem: [],
+      estadoBocinas: []
+    };
+  }
+
+  // Definir los rangos de cada tabla
+  const ranges = {
+    estadoFlota: "K4:N11",
+    bocinasDañadas: "K14:N21",
+    estadoModem: "K24:N28",
+    estadoBocinas: "K31:N37"
+  };
+
+  const tablesData = {};
+
+  for (const tableName in ranges) {
+    if (ranges.hasOwnProperty(tableName)) {
+      const range = ranges[tableName];
+      try {
+        tablesData[tableName] = resumenEquiposSheet.getRange(range).getValues();
+      } catch (e) {
+        console.error(`Error al obtener datos para la tabla ${tableName} en el rango ${range}: ${e.message}`);
+        tablesData[tableName] = []; // Asegurarse de que el array esté vacío en caso de error
+      }
+    }
+  }
+  return tablesData;
+}
+
+
+// =============================================================
+// FUNCIONES AUXILIARES
+// =============================================================
+
+function getUsuariosMap() {
+  const sheet = SS.getSheetByName("Usuarios");
+  if(!sheet) {
+    Logger.log("ERROR: La hoja 'Usuarios' no fue encontrada en getUsuariosMap.");
+    return {};
+  }
+  const data = sheet.getDataRange().getValues();
+  const map = {};
+  // CORRECCIÓN: map[codigo] = nombre. Antes estaba map[codigo] = codigo.
+  data.slice(1).forEach(row => { // Omite el encabezado
+    if (row[0] && row[1]) {
+      map[String(row[0]).trim()] = String(row[1]).trim(); 
+    }
+  });
+  return map;
+}
+
+
+
+function getContador(tecnicoCodigo) {
+  const repuestasSheet = SpreadsheetApp.getActive().getSheetByName("RepuestasForms");
+  if (!repuestasSheet) return 0;
+
+  const now = new Date();
+  const effectiveDate = new Date(now);
+  if (now.getHours() < 8) {
+    effectiveDate.setDate(effectiveDate.getDate() - 1);
+  }
+  effectiveDate.setHours(0, 0, 0, 0);
+
+  const TIME_ZONE = Session.getScriptTimeZone();
+  const todayStr = Utilities.formatDate(effectiveDate, TIME_ZONE, "yyyy-MM-dd");
+
+  const data = repuestasSheet.getDataRange().getValues();
+  let count = 0;
+
+  for (let i = 1; i < data.length; i++) {
+    const timestamp = data[i][0];      // Columna A: Fecha de registro
+    const codigoTecnico = data[i][18]; // Columna Q: Código del técnico (índice 16)
+
+    if (!(timestamp instanceof Date)) continue;
+    if (String(codigoTecnico).trim() !== String(tecnicoCodigo).trim()) continue;
+
+    const registroDate = new Date(timestamp);
+    if (registroDate.getHours() < 8) {
+      registroDate.setDate(registroDate.getDate() - 1);
+    }
+    registroDate.setHours(0, 0, 0, 0);
+
+    const registroStr = Utilities.formatDate(registroDate, TIME_ZONE, "yyyy-MM-dd");
+
+    if (registroStr === todayStr) {
+      count++;
+    }
+  }
+
+  return count;
+}
+
+
+function getContadorUsuarioActual(codigo) {
+  return getContador(codigo); // ✅ Usa RepuestasForms como fuente oficial
+}
+
+// --- NUEVA FUNCIÓN EN CODE.GS ---
+function getCuotaDiaria(codigoTecnico) {
+  const sheet = SS.getSheetByName("Usuarios");
+  if (!sheet) {
+    Logger.log("ERROR: La hoja 'Usuarios' no fue encontrada.");
+    return 0; // Devolver 0 si la hoja no existe
+  }
+
+  const data = sheet.getDataRange().getValues();
+  // !!! AJUSTA ESTOS ÍNDICES SEGÚN TU HOJA "USUARIOS" !!!
+  const CODIGO_COL = 0; // Columna A (código del técnico)
+  const CUOTA_COL = 2;  // Columna C (cuota diaria)
+
+  for (let i = 1; i < data.length; i++) { // Empieza en 1 para saltar la fila de encabezado
+    const userCodigo = String(data[i][CODIGO_COL]).trim();
+    if (userCodigo === String(codigoTecnico).trim()) {
+      // Asegúrate de que el valor en la hoja sea numérico. Si no lo es, se convertirá a 0.
+      return Number(data[i][CUOTA_COL]) || 0;
+    }
+  }
+  return 0; // Devolver 0 si el técnico no se encuentra
+}
+
+
+
+Index.html
+
+<!DOCTYPE html>
+<html>
+<head>
+    <base target="_top">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bitacora E.E</title>
+    <link rel="icon" href="https://www.mibus.com.pa/wp-content/uploads/2020/05/retina-logo.png" type="image/x-icon">
+    <style>
+        /*  */
+        :root {
+            --color-principal: #1A237E;       /* Azul Profundo (encabezados, barras laterales) */
+            --color-secundario: #3949AB;      /* Azul Acero - Botones principales, navegación */
+            --color-acento: #F9A825;          /* Amarillo Dorado - Botones de acción como "Atender", "Guardar" */
+            --color-fondo-claro: #F5F5F5;     /* Gris Claro Neutro - Fondos */
+            --color-texto: #212121;           /* Negro Suave - Texto principal */
+            --color-texto-claro: #FFFFFF;     /* Blanco - Texto sobre botones oscuros */
+            --color-borde-claro: #BDBDBD;     /* Gris Medio - Bordes y separadores */
+            --color-peligro: #D32F2F;         /* Rojo Intenso - Botones de eliminar o advertencias */
+            --color-peligro-hover: #B71C1C;   /* Rojo más oscuro para hover */
+            --color-exito: #43A047;           /* Verde éxito - para estados confirmados */
+            --color-exito-hover: #2E7D32;
+
+            --color-info: #0288D1;            /* Azul información - para mensajes neutros */
+            --color-info-hover: #0277BD;
+
+            --color-fondo-oscuro: #121212;    /* Para dark mode */
+            --color-texto-oscuro: #E0E0E0;
+
+            --color-hover: #EEEEEE;           /* Hover general para fondos claros */
+            --color-disabled: #9E9E9E;        /* Texto o botones desactivados */
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            background-color: var(--color-fondo-claro); /* Fondo general celeste suave */
+            color: var(--color-texto);
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+        .header {
+            background-color: var(--color-principal); /* Azul/Verde Oscuro */
+            color: var(--color-texto-claro);
+            padding: 15px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .header img {
+            height: 50px;
+            margin-right: 15px;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 1.8em;
+            flex-grow: 1;
+        }
+        .header .user-info {
+            font-size: 0.9em;
+            text-align: right;
+        }
+        .header .user-info span {
+            font-weight: bold;
+        }
+        .header button {
+            background-color: var(--color-peligro); /* Rojo claro para Cerrar Sesión */
+            color: var(--color-texto-claro);
+            border: none;
+            padding: 8px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-left: 20px;
+            font-size: 0.9em;
+            transition: background-color 0.3s ease;
+        }
+        .header button:hover {
+            background-color: var(--color-peligro-hover);
+        }
+
+        .navbar {
+            background-color: var(--color-secundario); /* Verde Caña */
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding: 10px 0;
+            text-align: center;
+        }
+        .navbar ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+        }
+        .navbar li {
+            margin: 0 15px;
+        }
+        .navbar button {
+            background: none;
+            border: none;
+            color: var(--color-texto-claro);
+            font-size: 1.1em;
+            padding: 8px 15px;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: background-color 0.3s ease, transform 0.2s ease;
+        }
+        .navbar button:hover {
+            background-color: var(--color-principal); /* Azul/Verde Oscuro al pasar el ratón */
+            transform: translateY(-2px);
+        }
+        .navbar button.active {
+            background-color: var(--color-principal); /* Azul/Verde Oscuro para el activo */
+            font-weight: bold;
+            box-shadow: inset 0 0 5px rgba(0,0,0,0.2);
+        }
+
+        .container {
+            flex-grow: 1;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 20px auto;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        .hidden {
+            display: none !important;
+        }
+        .app-section {
+            padding: 20px;
+        }
+        .section-header {
+            border-bottom: 2px solid var(--color-secundario); /* Verde Caña */
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+            color: var(--color-principal); /* Azul/Verde Oscuro */
+            font-size: 1.5em;
+            font-weight: bold;
+        }
+
+        .login-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background-color: var(--color-fondo-claro); /* Celeste Suave */
+        }
+        .login-box {
+            background-color: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+            text-align: center;
+        }
+        .login-box h2 {
+            color: var(--color-principal); /* Azul/Verde Oscuro */
+            margin-bottom: 25px;
+        }
+        .login-box input[type="text"] {
+            width: calc(100% - 20px);
+            padding: 10px;
+            margin-bottom: 20px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: 1em;
+        }
+        .login-box button {
+            background-color: var(--color-secundario); /* Verde Caña */
+            color: var(--color-texto-claro);
+            padding: 12px 25px;
+            border: none;
+            border-radius: 5px;
+            font-size: 1.1em;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        .login-box button:hover {
+            background-color: var(--color-principal); /* Azul/Verde Oscuro */
+        }
+
+        /* Table Styles */
+        .table-container {
+            overflow-x: auto;
+            margin-top: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+            background-color: #ffffff;
+            border-radius: 8px;
+            overflow: hidden; /* Ensures rounded corners apply to content */
+        }
+        table thead {
+            background-color: var(--color-secundario); /* Verde Caña */
+            color: var(--color-texto-claro);
+        }
+        table th, table td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+            white-space: nowrap; /* Prevent text wrapping in cells */
+        }
+        table tbody tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        table tbody tr:hover {
+            background-color: var(--color-fondo-claro); /* Celeste Suave al pasar el ratón */
+            transition: background-color 0.2s ease;
+        }
+        table td button {
+            background-color: var(--color-acento); /* Verde Teal para botones de acción */
+            color: white;
+            border: none;
+            padding: 7px 12px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.85em;
+            transition: background-color 0.3s ease;
+        }
+        table td button:hover {
+            background-color: var(--color-secundario); /* Verde Caña para hover */
+        }
+        table td button.btn-danger {
+            background-color: var(--color-peligro); /* Rojo claro para peligro */
+        }
+        table td button.btn-danger:hover {
+            background-color: var(--color-peligro-hover);
+        }
+
+        /* NEW: Styles for Total Rows/Columns */
+        table th.total-header {
+            background-color: var(--color-principal); /* Verde Oscuro */
+            color: var(--color-texto-claro);
+            font-weight: bold;
+            text-align: left;
+        }
+        table td.total-cell {
+            background-color: #e6f5f4; /* Un tono más claro que el fondo claro */
+            font-weight: bold;
+            text-align: left; /* Alinea los números totales al centro */
+            color: var(--color-principal); /* Texto principal para mayor contraste */
+        }
+        /* NEW: Styles for Total Rows */
+        table tr.total-row {
+            background-color: var(--color-principal); /* Fondo más oscuro para la fila total */
+            color: var(--color-texto-claro); /* Texto blanco para la fila total */
+            font-weight: bold;
+        }
+        table tr.total-row td {
+            border-top: 2px solid var(--color-principal); /* Borde más fuerte para la fila total */
+            /* Asegura que las celdas en la fila total sean negritas y sobrescriban si el fondo de total-cell es más claro */
+            font-weight: bold; 
+            background-color: var(--color-principal); /* Asegura que las celdas de la fila total mantengan el fondo de la fila total */
+            color: var(--color-texto-claro);
+        }
+
+        .top-controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap; /* Allow wrapping on smaller screens */
+            align-items: center;
+        }
+        .top-controls button,
+        .top-controls input,
+        .top-controls select {
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: 0.9em;
+        }
+        .top-controls button {
+            background-color: var(--color-secundario); /* Verde Caña */
+            color: white;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        .top-controls button:hover {
+            background-color: var(--color-principal); /* Azul/Verde Oscuro */
+        }
+
+        /* Form Specific Styles for Usuario Form */
+        .form-container {
+            background-color: #fcfcfc;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            margin-top: 20px;
+        }
+        .form-container h3 {
+            color: var(--color-principal); /* Azul/Verde Oscuro */
+            border-bottom: 1px solid #e0e0e0;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+        .form-container .form-group {
+            margin-bottom: 15px;
+        }
+        .form-container label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        .form-container input[type="text"] {
+            width: calc(100% - 22px);
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: 1em;
+        }
+        .form-container .form-actions {
+            text-align: right;
+            margin-top: 25px;
+        }
+        .form-container .form-actions button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1em;
+            transition: background-color 0.3s ease;
+        }
+        .form-container .form-actions .btn-secondary {
+            background-color: #ccc;
+            color: #333;
+            margin-right: 10px;
+        }
+        .form-container .form-actions .btn-secondary:hover {
+            background-color: #bbb;
+        }
+        .form-container .form-actions button[type="submit"] {
+            background-color: var(--color-secundario); /* Verde Caña */
+            color: white;
+        }
+        .form-container .form-actions button[type="submit"]:hover {
+            background-color: var(--color-principal); /* Azul/Verde Oscuro */
+        }
+
+        /* FormularioHTML styles - copied from original */
+        .form-section {
+            background-color: #f0fdfc; /* Fondo claro para la sección del formulario */
+            border: 1px solid var(--color-borde-claro);
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        .section-title {
+            color: var(--color-acento); /* Verde Teal */
+            margin-top: 0;
+            margin-bottom: 15px;
+            border-bottom: 1px dashed var(--color-acento);
+            padding-bottom: 8px;
+        }
+        .section-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #444;
+        }
+        .form-group input[type="text"], .form-group select, .form-group textarea {
+            width: calc(100% - 20px);
+            padding: 10px;
+            border: 1px solid var(--color-borde-claro);
+            border-radius: 4px;
+            font-size: 1em;
+            box-sizing: border-box;
+        }
+        .form-group input[type="text"]:focus, .form-group select:focus, .form-group textarea:focus {
+            border-color: var(--color-acento); /* Verde Teal en foco */
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(0, 150, 136, 0.2);
+        }
+        .fieldset-legend {
+            font-weight: 600;
+            color: var(--color-secundario); /* Verde Caña */
+            padding: 0 5px;
+            margin-bottom: 10px;
+        }
+        .radio-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px 15px;
+        }
+        .radio-group label {
+            font-weight: normal;
+            margin-bottom: 0;
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+        }
+        .radio-group input[type="radio"] {
+            margin-right: 5px;
+            transform: scale(1.1);
+        }
+        .component-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+        }
+        .component-grid fieldset {
+            border: 1px solid var(--color-borde-claro);
+            border-radius: 8px;
+            padding: 10px 15px;
+            margin: 0;
+        }
+        .form-group.full-width {
+            grid-column: 1 / -1;
+        }
+        /* Toast notification */
+        #toast {
+            visibility: hidden;
+            min-width: 250px;
+            background-color: #333;
+            color: #fff;
+            text-align: center;
+            border-radius: 5px;
+            padding: 16px;
+            position: fixed;
+            z-index: 1000;
+            left: 50%;
+            bottom: 30px;
+            transform: translateX(-50%);
+            opacity: 0;
+            transition: visibility 0s, opacity 0.5s linear;
+        }
+        #toast.show {
+            visibility: visible;
+            opacity: 1;
+        }
+
+        /* Google Charts */
+        .chart-container {
+            width: 100%;
+            min-height: 300px; /* Ensures charts have space */
+            margin-bottom: 20px;
+        }
+        #resumenGrid, #resumenEquiposGrid { /* Added #resumenEquiposGrid here */
+            display: grid;
+            grid-template-columns: 1fr; /* Default to single column */
+            gap: 20px;
+        }
+        .tabla-resumen, .tabla-equipos {
+            display: none;
+        }
+
+        /* Mejora para formulario */
+
+        .form-container {
+          background-color: #ffffff;
+          padding: 30px 35px;
+          border-radius: 12px;
+          box-shadow: 0 8px 20px rgba(26, 35, 126, 0.15);
+          max-width: 600px;
+          margin: 30px auto;
+          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+          color: var(--color-texto);
+        }
+
+        .form-container h3 {
+          color: var(--color-principal);
+          font-weight: 700;
+          font-size: 1.8rem;
+          margin-bottom: 30px;
+          border-bottom: 3px solid var(--color-acento);
+          padding-bottom: 10px;
+        }
+
+        .form-group {
+          display: flex;
+          flex-direction: column;
+          margin-bottom: 22px;
+        }
+
+        .form-group label {
+          font-weight: 600;
+          margin-bottom: 8px;
+          color: #444444;
+          font-size: 1rem;
+          transition: color 0.3s ease;
+        }
+
+        .form-group input[type="text"],
+        .form-group input[type="email"],
+        .form-group input[type="password"],
+        .form-group select,
+        .form-group textarea {
+          padding: 14px 16px;
+          font-size: 1rem;
+          border: 2px solid var(--color-borde-claro);
+          border-radius: 8px;
+          transition: border-color 0.3s ease, box-shadow 0.3s ease;
+          box-shadow: inset 0 2px 6px rgba(0,0,0,0.05);
+          font-family: inherit;
+          resize: vertical;
+        }
+
+        .form-group input[type="text"]:focus,
+        .form-group input[type="email"]:focus,
+        .form-group input[type="password"]:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+          border-color: var(--color-acento);
+          box-shadow: 0 0 8px rgba(249, 168, 37, 0.5);
+          outline: none;
+        }
+
+        .form-group textarea {
+          min-height: 100px;
+        }
+
+        .form-actions {
+          display: flex;
+          justify-content: flex-end;
+          gap: 15px;
+          margin-top: 30px;
+        }
+
+        .form-actions button {
+          padding: 14px 28px;
+          font-size: 1rem;
+          font-weight: 600;
+          border-radius: 8px;
+          cursor: pointer;
+          border: none;
+          transition: background-color 0.3s ease, box-shadow 0.3s ease;
+          box-shadow: 0 4px 12px rgba(57, 73, 171, 0.25);
+        }
+
+        .form-actions .btn-secondary {
+          background-color: #e0e0e0;
+          color: #555555;
+          box-shadow: none;
+        }
+
+        .form-actions .btn-secondary:hover {
+          background-color: #c7c7c7;
+        }
+
+        .form-actions button[type="submit"] {
+          background-color: var(--color-secundario);
+          color: var(--color-texto-claro);
+          box-shadow: 0 6px 20px rgba(57, 73, 171, 0.5);
+        }
+
+        .form-actions button[type="submit"]:hover {
+          background-color: var(--color-principal);
+          box-shadow: 0 8px 25px rgba(26, 35, 126, 0.7);
+        }
+
+        /* Responsive - Campos lado a lado en pantallas grandes */
+
+        @media (min-width: 600px) {
+          .form-container .form-group.row {
+            display: flex;
+            gap: 20px;
+          }
+          .form-container .form-group.row > div {
+            flex: 1;
+          }
+        }
+
+        /* Opcional: estilizar inputs deshabilitados */
+
+        .form-group input[disabled],
+        .form-group select[disabled],
+        .form-group textarea[disabled] {
+          background-color: #f9f9f9;
+          border-color: #ddd;
+          color: #aaa;
+          cursor: not-allowed;
+        }
+
+        .radio-group input[type="radio"] {
+            margin-right: 8px;
+            transform: scale(1.4); /* Aumenta el tamaño al 140% */
+            cursor: pointer;
+        }
+
+        .contador-actualizado {
+          background-color: #d1ffd1;
+          transition: background-color 0.3s ease;
+        }
+
+
+
+        
+    </style>
+</head>
+<body>
+    <div id="loadingOverlay" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(255,255,255,0.8); z-index:9999; justify-content:center; align-items:center;">
+        <p style="font-size:1.5em; color:var(--color-secundario);">Cargando datos...</p>
+    </div>
+
+    <div id="appContainer" class="hidden">
+        <div class="header">
+            <img src="https://www.mibus.com.pa/wp-content/uploads/2020/05/retina-logo.png" alt="MiBus Logo">
+            <h1>Bitacora Equipamiento y Embarcado</h1>
+            <div class="user-info">
+            Bienvenido, <span id="userName"></span><br>
+            Código: <span id="userCode"></span><br>
+            <strong>Buses Atendidos Hoy:</strong> <span id="userBusCounter">0</span> / <span id="cuotaDiaria"></span>
+          </div>
+            <button onclick="logout()">Cerrar Sesión</button>
+        </div>
+
+        <nav class="navbar">
+            <ul>
+                <li><button id="reportesNav" onclick="navigate('reportes')">Bitacora</button></li>
+                <li><button id="inventarioNav" onclick="navigate('inventario')">Inventario</button></li>
+                <li id="resumenNavContainer" class="hidden"><button id="resumenNav" onclick="navigate('resumen')">Resumen</button></li>
+                <!-- NUEVO: Enlace para Resumen de Equipos -->
+                <li id="resumenEquiposNavContainer" class="hidden"><button id="resumenEquiposNav" onclick="navigate('resumenEquipos')">Inventario de Equipos</button></li>
+                <li id="usuariosNavContainer" class="hidden"><button id="usuariosNav" onclick="navigate('usuarios')">Usuarios</button></li>
+            </ul>
+        </nav>
+
+        <div class="container">
+            <section id="reportesSection" class="app-section hidden">
+                <div class="section-header"><h3>Bitacora</h3></div>
+                <div class="top-controls">
+                    <button onclick="loadData('reportes')">Actualizar</button>
+                    <input type="text" id="filterInputReportes" placeholder="Buscar en tabla..." onkeyup="filterTable('reportes')">
+                    <select id="patioFilterReportes" onchange="filterTable('reportes')">
+                        <option value="">Todos los Patios</option>
+                        <option value="Patio La Cabima">Patio La Cabima</option>
+                        <option value="Patio Chorrillo">Patio Patio Chorrillo</option>
+                        <option value="Patio Curundu">Patio Curundú</option>
+                        <option value="Patio La Dona">Patio La Doña</option>
+                        <option value="Patio Los Pueblos">Patio Patio Los Pueblos</option>
+                        <option value="Patio Ojo de Agua">Patio Patio Ojo de Agua</option>
+                    </select>
+                </div>
+                <div class="table-container">
+                    <table id="reportesTable">
+                        <thead><tr><th>Móvil</th><th>Estado</th><th>Patio</th><th>Fecha</th><th>Hora</th><th>Diagnóstico</th><th>Acción</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section id="inventarioSection" class="app-section hidden">
+                <div class="section-header"><h3>Inventario de Flota</h3></div>
+                <div class="top-controls">
+                    <button onclick="loadData('inventario')">Actualizar</button>
+                    <input type="text" id="filterInputInventario" placeholder="Buscar en tabla..." onkeyup="filterTable('inventario')">
+                    <select id="patioFilterInventario" onchange="filterTable('inventario')">
+                        <option value="">Todos los Patios</option>
+                        <option value="Patio La Cabima">Patio La Cabima</option>
+                        <option value="Patio Chorrillo">Patio Patio Chorrillo</option>
+                        <option value="Patio Curundu">Patio Curundú</option>
+                        <option value="Patio La Dona">Patio La Doña</option>
+                        <option value="Patio Los Pueblos">Patio Patio Los Pueblos</option>
+                        <option value="Patio Ojo de Agua">Patio Patio Ojo de Agua</option>
+                    </select>
+                </div>
+                <div class="table-container">
+                    <table id="inventarioTable">
+                        <thead><tr><th>Patio</th><th>Móvil</th><th>Hora</th><th>Estado</th><th>Última Atención</th><th>Fecha Actual</th><th>Diagnóstico</th><th>Acción</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section id="formularioSeccion" class="app-section hidden">
+                <div class="section-header"><h3>Registro de Mantenimiento</h3></div>
+                <?!= include('FormularioHTML'); ?>
+            </section>
+
+            <section id="resumenSection" class="app-section hidden">
+                <div class="section-header"><h3>Resumen y Estadísticas</h3></div>
+                <div class="top-controls">
+                      <label for="tablaResumenSelector">Mostrar:</label>
+                      <select id="tablaResumenSelector" onchange="mostrarTablaResumen()">
+                          <option value="">Seleciona una opción</option>
+                          <option value="tipo">Atenciones por Tipo de Mantenimiento</option>
+                          <option value="patio">Atenciones por Patio</option>
+                          <option value="tecnico">Atenciones por Técnico</option>
+                          <option value="modem">Atenciones por Estado de Modem</option>
+                      </select>
+                  </div>
+                <div class="top-controls">
+                    <label for="fechaInicio">Desde:</label>
+                    <input type="date" id="fechaInicio">
+                    <button onclick="loadData('resumen')">Generar Resumen</button>
+                    
+
+                </div>
+                
+                <div id="resumenGrid">
+                    <div>
+                        <div class="tabla-resumen tipo">
+                          <h4>Atenciones por Tipo de Mantenimiento</h4>
+                            <table id="resumenTipoTable">
+                                <thead><tr><th>Tipo</th><th>Lunes</th><th>Martes</th><th>Miercoles</th><th>Jueves</th><th>Viernes</th><th>Sabado</th><th>Total</th></tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="tabla-resumen patio">
+                          <h4>Atenciones por Patio</h4>
+                            <table id="resumenPatioTable">
+                                <thead><tr><th>Patio</th><th>Lunes</th><th>Martes</th><th>Miercoles</th><th>Jueves</th><th>Viernes</th><th>Sabado</th><th>Total</th></tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div>                       
+                        <div class="tabla-resumen tecnico">
+                          <h4>Atenciones por Técnico</h4>
+                            <table id="resumenTecnicoTable">
+                                <thead><tr><th>Técnico</th><th>Lunes</th><th>Martes</th><th>Miercoles</th><th>Jueves</th><th>Viernes</th><th>Sabado</th><th>Total</th></tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div>                       
+                        <div class="tabla-resumen modem">
+                          <h4>Atenciones por Estado de Modem</h4>
+                            <table id="resumenModemTable">
+                                <thead><tr><th>Estado Modem</th><th>Lunes</th><th>Martes</th><th>Miercoles</th><th>Jueves</th><th>Viernes</th><th>Sabado</th><th>Total</th></tr></thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="chart-container" id="chart_tipo_mantenimiento"></div>
+                    <div class="chart-container" id="chart_patio"></div>
+                    <div class="chart-container" id="chart_tecnico"></div>
+                    <div class="chart-container" id="chart_modem"></div>
+                </div>
+            </section>
+
+            <!-- NUEVO: Sección de Resumen de Equipos -->
+            <section id="resumenEquiposSection" class="app-section hidden">
+                <div class="section-header"><h3>Inventario de Equipos de Flota</h3></div> 
+                <div id="resumenEquiposGrid">
+                <div class="top-controls">
+                    <label for="tablaEquiposSelector">Mostrar:</label>
+                    <select id="tablaEquiposSelector" onchange="mostrarTablaResumenEquipos()">
+                        <option value="">Seleciona una opción</option>
+                        <option value="estadoFlota">Estado de Modem por patio</option>
+                        <option value="estadoModem">Estado de Módem</option>
+                        <option value="bocinasDanadas">Bocinas Dañadas</option>
+                        <option value="estadoBocinas">Estado de Bocinas</option>
+                    </select>
+                </div>
+
+                    <!-- Tabla: Estado de Flota (K4:N17) -->
+                    <div class="tabla-equipos estadoFlota">
+                      <h5 class="mb-0">Estado de Modem por patio</h5>
+                      <div class="table-responsive">
+                          <table id="estadoFlotaTable" class="table table-striped table-bordered table-hover">
+                              <thead><tr><th>Patio</th><th>Inoperativo</th><th>Operativo</th><th>Total</th></tr></thead>
+                              <tbody></tbody>
+                          </table>
+                      </div>
+                    </div>
+
+                    <!-- Tabla: Bocinas Dañadas por Patio (K20:N33) -->
+                    <div class="tabla-equipos bocinasDanadas">
+                      <h5 class="mb-0">Bocinas Dañadas por Patio</h5>
+                      <div class="table-responsive">
+                          <table id="bocinasDanadasTable" class="table table-striped table-bordered table-hover">
+                              <thead><tr><th>Patio</th><th>Dañada</th><th>Vandalismo</th><th>Total</th></tr></thead>
+                              <tbody></tbody>
+                          </table>
+                      </div>
+                    </div>
+
+                    <!-- Tabla: Estado de Módem (K36:N40) -->
+                    <div class="tabla-equipos estadoModem">
+                      <h5 class="mb-0">Estado de Módem</h5>
+                      <div class="table-responsive">
+                          <table id="estadoModemTable" class="table table-striped table-bordered table-hover">
+                              <thead><tr><th>Modem</th><th>Inoperativo</th><th>Operativo</th><th>Total</th></tr></thead>
+                              <tbody></tbody>
+                          </table>
+                      </div>
+                    </div>
+
+                    <!-- Tabla: Estado de Bocinas (K43:N48) -->
+                    <div class="tabla-equipos estadoBocinas">
+                      <h5 class="mb-0">Estado de Bocinas</h5>
+                      <div class="table-responsive">
+                          <table id="estadoBocinasTable" class="table table-striped table-bordered table-hover">
+                              <thead><tr><th>Bocina</th><th>Inoperativo</th><th>Operativo</th><th>Total</th></tr></thead>
+                              <tbody></tbody>
+                          </table>
+                      </div>
+                    </div>
+                    <!-- Gráficos para resumenEquipos -->
+                    <div class="chart-container" id="chart_estado_flota"></div>
+                    <div class="chart-container" id="chart_bocinas_danadas"></div>
+                    <div class="chart-container" id="chart_estado_modem"></div>
+                    <div class="chart-container" id="chart_estado_bocinas"></div>
+                </div>
+            </section>
+
+            <section id="usuariosSection" class="app-section hidden">
+                <div class="section-header"><h3>Gestión de Usuarios</h3></div>
+                <div class="top-controls">
+                    <button onclick="showUsuarioForm()">Agregar Nuevo Usuario</button>
+                    <button onclick="loadData('usuarios')">Actualizar Lista</button>
+                </div>
+                <div class="table-container">
+                    <table id="usuariosTable">
+                        <thead><tr><th>Código</th><th>Nombre</th><th>Acciones</th></tr></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+
+                <div id="usuarioFormContainer" class="form-container hidden">
+                    <h3 id="usuarioFormTitle"></h3>
+                    <form id="usuarioForm" onsubmit="handleUsuarioSubmit(event)">
+                        <div class="form-group">
+                            <label for="usuarioCodigo">Código de Usuario:</label>
+                            <input type="text" id="usuarioCodigo" required maxlength="10">
+                        </div>
+                        <div class="form-group">
+                            <label for="usuarioNombre">Nombre Completo:</label>
+                            <input type="text" id="usuarioNombre" required maxlength="50">
+                        </div>
+                        <div class="form-actions">
+                            <button type="button" class="btn-secondary" onclick="hideUsuarioForm()">Cancelar</button>
+                            <button type="submit">Guardar Usuario</button>
+                        </div>
+                    </form>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <div id="loginContainer" class="login-container">
+        <div class="login-box">
+            <img src="https://www.mibus.com.pa/wp-content/uploads/2020/05/retina-logo.png" alt="MiBus Logo" style="height:80px; margin-bottom:20px;">
+            <h2>Iniciar Sesión</h2>
+            <input type="text" id="loginCodigo" placeholder="Ingrese su código" required>
+            <button onclick="login()">Entrar</button>
+        </div>
+    </div>
+
+    <div id="toast"></div>
+    <input type="hidden" id="formReportId"> 
+    <input type="hidden" id="formMovil"> <!-- Added this, might be missing from your original HTML -->
+    <input type="hidden" id="formSource"> <!-- Added this, might be missing from your original HTML -->
+
+    <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+    <script>
+    google.charts.load('current', {'packages':['corechart']});
+
+    // --- STATE MANAGEMENT ---
+    let allData = {
+        reportes: [],
+        inventario: []
+    };
+    let currentUser = {
+        name: '',
+        codigo: '',
+        isAdmin: false
+    };
+
+    // --- ON LOAD ---
+    document.addEventListener("DOMContentLoaded", () => {
+        const codigo = localStorage.getItem("userCodigo");
+        if (codigo) {
+            showLoadingOverlay();
+            google.script.run.withSuccessHandler(userInfo => {
+                hideLoadingOverlay();
+                if (userInfo) {
+                    setupApp(codigo, userInfo);
+                } else {
+                    logout(); // Código inválido o eliminado
+                }
+            }).getUserInfo(codigo);
+        } else {
+            document.getElementById('loginContainer').classList.remove('hidden');
+        }
+    });
+
+    // --- AUTH & SETUP ---
+    function showLoadingOverlay() {
+        document.getElementById('loadingOverlay').style.display = 'flex';
+    }
+
+    function hideLoadingOverlay() {
+        document.getElementById('loadingOverlay').style.display = 'none';
+    }
+
+    function login() {
+        const codigo = document.getElementById('loginCodigo').value.trim();
+        if (codigo) {
+            showLoadingOverlay();
+            google.script.run.withSuccessHandler(userInfo => {
+                hideLoadingOverlay();
+                if (userInfo) {
+                    localStorage.setItem("userCodigo", codigo);
+                    setupApp(codigo, userInfo);
+                } else {
+                    showToast("Código incorrecto o usuario no registrado.");
+                }
+            }).getUserInfo(codigo);
+        } else {
+            showToast("Por favor, ingrese su código.");
+        }
+    }
+
+    // --- MODIFICACIÓN EN Index.html (dentro de la etiqueta <script>) ---
+    function setupApp(codigo, userInfo) {
+        console.log("✅ setupApp ejecutándose para:", userInfo);
+        currentUser.name = userInfo.nombre;
+        currentUser.codigo = codigo;
+        currentUser.isAdmin = userInfo.isAdmin;
+
+        document.getElementById('userName').textContent = currentUser.name;
+        document.getElementById('userCode').textContent = currentUser.codigo;
+        
+        // *** NUEVA LÍNEA IMPORTANTE ***
+        document.getElementById('cuotaDiaria').textContent = userInfo.cuotaDiaria || 'N/A'; // Muestra la cuota
+        
+        google.script.run.withSuccessHandler(count => {
+            document.getElementById('userBusCounter').textContent = count;
+        }).getContadorUsuarioActual(codigo);
+
+        if (currentUser.isAdmin) {
+            document.getElementById('resumenNavContainer').classList.remove('hidden');
+            document.getElementById('resumenEquiposNavContainer').classList.remove('hidden');
+            document.getElementById('usuariosNavContainer').classList.remove('hidden');
+        } else {
+            document.getElementById('resumenNavContainer').classList.add('hidden');
+            document.getElementById('resumenEquiposNavContainer').classList.add('hidden');
+            document.getElementById('usuariosNavContainer').classList.add('hidden');
+        }
+
+        document.getElementById('loginContainer').classList.add('hidden');
+        document.getElementById('appContainer').classList.remove('hidden');
+        navigate('reportes'); // Default section
+    }
+
+    function logout() {
+        localStorage.removeItem("userCodigo");
+        document.getElementById('appContainer').classList.add('hidden');
+        document.getElementById('loginContainer').classList.remove('hidden');
+        document.getElementById('loginCodigo').value = '';
+        showToast("Sesión cerrada.");
+    }
+
+    function navigate(sectionName) {
+        document.querySelectorAll('.app-section').forEach(s => s.classList.add('hidden'));
+        document.querySelectorAll('.navbar button').forEach(btn => btn.classList.remove('active'));
+
+        document.getElementById(`${sectionName}Section`).classList.remove('hidden');
+        // Ensure the correct button ID is used. For 'resumenEquipos' it's 'resumenEquiposNav' in the HTML.
+        const navButtonId = sectionName === 'resumenEquipos' ? 'resumenEquiposNav' : `${sectionName}Nav`;
+        document.getElementById(navButtonId).classList.add('active');
+
+        loadData(sectionName);
+    }
+
+    function loadData(sectionName) {
+        showLoadingOverlay();
+        switch (sectionName) {
+            case 'reportes':
+                google.script.run.withSuccessHandler(data => {
+                    hideLoadingOverlay();
+                    allData.reportes = data;
+                    renderTable('reportes');
+                }).obtenerDatosDeReportes();
+                break;
+            case 'inventario':
+                google.script.run.withSuccessHandler(data => {
+                    hideLoadingOverlay();
+                    allData.inventario = data;
+                    renderTable('inventario');
+                }).obtenerDatosDeInventario();
+                break;
+            case 'resumen':
+                const fechaInicio = document.getElementById('fechaInicio').value;
+                google.script.run.withSuccessHandler(data => {
+                    hideLoadingOverlay();
+                    renderResumen(data);
+                }).obtenerDatosDeResumen({ fechaInicio: fechaInicio });
+                break;
+            case 'resumenEquipos': // Caso para Resumen de Equipos (sin filtros de fecha desde el cliente)
+                google.script.run.withSuccessHandler(tablesData => { // Renamed 'data' to 'tablesData' for clarity
+                    hideLoadingOverlay();
+                    renderResumenEquipos(tablesData); 
+                }).getResumenEquiposTablesData(); // CORRECTED: Calling the new function from Code.gs
+                break;
+            case 'usuarios':
+                google.script.run.withSuccessHandler(users => {
+                    hideLoadingOverlay();
+                    renderUsuarios(users);
+                }).obtenerDatosUsuarios();
+                break;
+            default:
+                hideLoadingOverlay();
+                break;
+        }
+    }
+
+    function renderTable(type) {
+        const data = allData[type];
+        const tableBody = document.getElementById(`${type}Table`).querySelector('tbody');
+        tableBody.innerHTML = '';
+        
+        if (!data || data.length === 0) {
+            const tr = tableBody.insertRow();
+            const td = tr.insertCell();
+            td.colSpan = (type === 'reportes' ? 7 : 8); // Adjust colspan for reports (7 columns including action) and inventario (8 columns including action)
+            td.textContent = 'No hay datos para mostrar.';
+            td.style.textAlign = 'center';
+            return;
+        }
+
+        data.forEach(row => {
+            const tr = tableBody.insertRow();
+            
+            // For 'reportes', row structure is [Móvil, Estado, Patio, Fecha, Hora, Diagnóstico, ReportID]
+            // We want to display Móvil, Estado, Patio, Fecha, Hora, Diagnóstico
+            if (type === 'reportes') {
+                const movil = row[0];
+                const estado = row[1];
+                const patio = row[2];
+                const fecha = row[3];
+                const hora = row[4];
+                const diagnostico = row[5];
+                const reportId = row[6]; // This is the new unique ID
+
+                tr.insertCell().textContent = movil;
+                tr.insertCell().textContent = estado;
+                tr.insertCell().textContent = patio;
+                tr.insertCell().textContent = fecha;
+                tr.insertCell().textContent = hora;
+                tr.insertCell().textContent = diagnostico;
+
+                const actionTd = tr.insertCell();
+                const btn = document.createElement('button');
+                btn.textContent = "Atender";
+                // Pass reportId directly to mostrarFormulario for 'reportes'
+                btn.onclick = () => mostrarFormulario(reportId, movil, type);
+                actionTd.appendChild(btn);
+
+            } else { // 'inventario'
+                // For 'inventario', row structure is [Patio, Móvil, Hora, Estado, Última Atención, Fecha Actual, Diagnóstico]
+                const patio = row[0];
+                const movil = row[1];
+                const hora = row[2];
+                const estado = row[3];
+                const ultimaAtencion = row[4]; 
+                const fechaActual = row[5];     
+                const diagnostico = row[6];
+
+                tr.insertCell().textContent = patio;
+                tr.insertCell().textContent = movil;
+                tr.insertCell().textContent = hora;
+                tr.insertCell().textContent = estado;
+                tr.insertCell().textContent = ultimaAtencion; // Already formatted by server
+                tr.insertCell().textContent = fechaActual;    // Already formatted by server
+                tr.insertCell().textContent = diagnostico;
+
+                const actionTd = tr.insertCell();
+                const btn = document.createElement('button');
+                btn.textContent = "Atender";
+                // For 'inventario', we pass null for reportId as it's not applicable, but still pass movil.
+                btn.onclick = () => mostrarFormulario(null, movil, type); 
+                actionTd.appendChild(btn);
+            }
+        });
+        filterTable(type); // Apply initial filter after rendering
+    }
+
+    function filterTable(type) {
+        const input = document.getElementById(`filterInput${type === 'reportes' ? 'Reportes' : 'Inventario'}`);
+        const filterText = input.value.toUpperCase();
+        const table = document.getElementById(`${type}Table`);
+        const tr = table.getElementsByTagName("tr");
+
+        const patioFilterElement = document.getElementById(`patioFilter${type === 'reportes' ? 'Reportes' : 'Inventario'}`);
+        const selectedPatio = patioFilterElement ? patioFilterElement.value.toUpperCase() : '';
+
+        for (let i = 1; i < tr.length; i++) { // Start from 1 to skip header row
+            let displayRow = false;
+            let patioMatch = true;
+            let textMatch = false;
+
+            const cells = tr[i].getElementsByTagName("td");
+            // Check for text match across all cells
+            for (let j = 0; j < cells.length; j++) {
+                const cellText = cells[j].textContent || cells[j].innerText;
+                if (cellText.toUpperCase().indexOf(filterText) > -1) {
+                    textMatch = true;
+                    break;
+                }
+            }
+
+            // Check for patio match
+            if (selectedPatio) {
+                // Adjust index based on table type
+                const patioCellIndex = (type === 'reportes' ? 2 : 0); // Patio is at index 2 for reports, 0 for inventory
+                if (cells[patioCellIndex]) {
+                    const cellPatio = cells[patioCellIndex].textContent.toUpperCase();
+                    if (cellPatio.indexOf(selectedPatio) === -1) {
+                        patioMatch = false;
+                    }
+                } else {
+                    patioMatch = false; // If patio cell doesn't exist, don't match
+                }
+            }
+
+            if (textMatch && patioMatch) {
+                tr[i].style.display = "";
+            } else {
+                tr[i].style.display = "none";
+            }
+        }
+    }
+    
+    // --- FORMULARIO DE ATENCION ---
+    // Now takes reportId (for reports) or null (for inventario) and movil.
+    function mostrarFormulario(reportId, movil, source) {
+        document.querySelectorAll('.app-section').forEach(s => s.classList.add('hidden'));
+        document.getElementById('formularioSeccion').classList.remove('hidden');
+
+        const form = document.getElementById('atencionForm');
+        if (!form) {
+            showToast("Error: El formulario de atención no está disponible.");
+            return;
+        }
+        
+        const formReportIdInput = document.getElementById("formReportId"); 
+        const formMovilInput = document.getElementById("formMovil");
+        const formSourceInput = document.getElementById("formSource");
+
+        if (formReportIdInput && formMovilInput && formSourceInput) {
+            form.reset();
+            formReportIdInput.value = reportId; // Set the report ID
+            formMovilInput.value = movil;
+            formSourceInput.value = source;
+            
+            populateTecnicosDropdown(currentUser.name);
+            window.scrollTo(0, 0);
+        } else {
+            showToast("Error al inicializar el formulario. Campos ocultos no encontrados.");
+        }
+    }
+
+    function cancelarFormulario() {
+        const formSource = document.getElementById("formSource").value;
+        navigate(formSource); // Go back to the source list
+        document.getElementById('formularioSeccion').classList.add('hidden');
+    }
+
+    function enviarFormulario(event) {
+        event.preventDefault();
+        showLoadingOverlay();
+
+        const form = document.getElementById('atencionForm');
+        const formData = new FormData(form);
+        const data = {};
+        for (let [key, value] of formData.entries()) {
+            data[key] = value;
+        }
+        // Add additional info from hidden inputs
+        data.reportId = document.getElementById("formReportId").value; // Get the report ID
+        data.source = document.getElementById("formSource").value; 
+        
+        google.script.run
+            .withSuccessHandler(response => {
+                hideLoadingOverlay();
+                showToast(response.message);
+                if(response.status === 'success') {
+                    cancelarFormulario(); // Go back to appropriate list
+
+                    google.script.run.withSuccessHandler(count => {
+                      const counterEl = document.getElementById('userBusCounter');
+                      counterEl.textContent = count;
+
+                      // ✨ Animación rápida para mostrar cambio
+                      counterEl.classList.add("contador-actualizado");
+                      setTimeout(() => counterEl.classList.remove("contador-actualizado"), 600);
+                    }).getContadorUsuarioActual(currentUser.codigo);
+
+
+                } else {
+                    // If there's an error (like report already processed), refresh the list
+                    // This is important to reflect changes made by other users
+                    loadData(data.source); 
+                }
+            })
+            .withFailureHandler(error => {
+                hideLoadingOverlay();
+                console.error("Error al enviar formulario:", error);
+                showToast("Error al enviar formulario: " + error.message);
+                // On failure, also refresh the list in case of race condition
+                loadData(data.source);
+            })
+            .guardarBitacoraYAtender(data);
+    }
+
+    function populateTecnicosDropdown(selectedName) {
+        google.script.run.withSuccessHandler(users => {
+            const selectElement = document.getElementById('formTecnico');
+            selectElement.innerHTML = ''; // Clear existing options
+
+            const defaultOption = document.createElement('option');
+            defaultOption.value = "";
+            defaultOption.textContent = "Seleccione un técnico...";
+            defaultOption.disabled = true;
+            defaultOption.selected = true;
+            selectElement.appendChild(defaultOption);
+
+            users.forEach(user => {
+                const option = document.createElement('option');
+                option.value = user.nombre; // Value is the name
+                option.textContent = user.nombre;
+                if (user.nombre === selectedName) {
+                    option.selected = true;
+                }
+                selectElement.appendChild(option);
+            });
+        }).obtenerDatosUsuarios();
+    }
+
+    // --- RESUMEN SECTION ---
+    function renderResumen(data) {
+        if (!data || data.error) {
+            showToast(data.error || "Error al cargar resumen.");
+            return;
+        }
+
+        // Helper to render tables
+        const renderSummaryTable = (tableId, headers, tableData) => {
+            const tableBody = document.getElementById(tableId).querySelector('tbody');
+            tableBody.innerHTML = '';
+            if (tableData && tableData.length > 1) { // Check if there's data beyond headers
+                tableData.slice(1).forEach(row => { // Skip header row from data
+                    const tr = tableBody.insertRow();
+                    row.forEach(cell => tr.insertCell().textContent = cell);
+                });
+            } else {
+                const tr = tableBody.insertRow();
+                const td = tr.insertCell();
+                td.colSpan = headers.length;
+                td.textContent = 'No hay datos para mostrar.';
+                td.style.textAlign = 'center';
+            }
+        };
+
+        // Render tables (assuming data structure from Code.gs)
+        renderSummaryTable('resumenTipoTable', ['Tipo', 'Total'], data.tiposMantenimiento);
+        renderSummaryTable('resumenPatioTable', ['Patio',  'Total'], data.atencionesPorPatio);
+        renderSummaryTable('resumenTecnicoTable', ['Patio', 'Lunes', 'Martes', 'Miercoles', 'Jueves', 'Viernes', 'Sabado', 'Total'], data.atencionesPorTecnico);
+        renderSummaryTable('resumenModemTable', ['Estado Modem', 'Total'], data.estadoModem);
+
+        // Draw Charts
+        try {
+            if (google.charts.visualization) { // Ensure charts library is loaded
+                if (data.atencionesPorPatio && data.atencionesPorPatio.length > 1) {
+                    drawPieChart(document.getElementById('chart_patio'), 'Atenciones por Patio', data.atencionesPorPatio);
+                } else {
+                    document.getElementById('chart_patio').innerHTML = '<p style="text-align:center;">No hay datos para el gráfico de Patio.</p>';
+                }
+
+                if (data.atencionesPorTecnico && data.atencionesPorTecnico.length > 1) {
+                    drawBarChart(document.getElementById('chart_tecnico'), 'Atenciones por Técnico', data.atencionesPorTecnico);
+                } else {
+                    document.getElementById('chart_tecnico').innerHTML = '<p style="text-align:center;">No hay datos para el gráfico de Técnico.</p>';
+                }
+
+                if (data.tiposMantenimiento && data.tiposMantenimiento.length > 1) {
+                    drawPieChart(document.getElementById('chart_tipo_mantenimiento'), 'Atenciones por Tipo de Mantenimiento', data.tiposMantenimiento);
+                } else {
+                    document.getElementById('chart_tipo_mantenimiento').innerHTML = '<p style="text-align:center;">No hay datos para el gráfico de Tipo de Mantenimiento.</p>';
+                }
+
+                if (data.estadoModem && data.estadoModem.length > 1) {
+                    drawPieChart(document.getElementById('chart_modem'), 'Estado del Modem', data.estadoModem);
+                } else {
+                    document.getElementById('chart_modem').innerHTML = '<p style="text-align:center;">No hay datos para el gráfico de Modem.</p>';
+                }
+
+            } else {
+                showToast("Google Charts no se cargó correctamente.");
+            }
+        } catch(e) {
+            console.error("Error al dibujar gráficos:", e);
+            showToast("No se pudieron mostrar los gráficos.")
+        }
+    }
+    
+    // --- NUEVA FUNCIÓN PARA RESUMEN DE EQUIPOS SECTION ---
+    function renderResumenEquipos(tablesData) { // Renamed 'data' to 'tablesData' for clarity
+        if (!tablesData) { // No need for tablesData.error as Code.gs returns an object with empty arrays
+            showToast("Error: No se pudieron cargar los datos de resumen de equipos.");
+            return;
+        }
+
+        // Helper para renderizar tablas
+        function renderEquiposSummaryTable(tableId, tableData) {
+        const tableBody = document.getElementById(tableId).querySelector('tbody');
+        const tableHead = document.getElementById(tableId).querySelector('thead');
+        tableBody.innerHTML = '';
+        tableHead.innerHTML = '';
+
+        console.log(`Rendering table: ${tableId}`, tableData); // Debugging: Log data for specific table
+
+        if (!tableData || tableData.length === 0) {
+            console.warn(`No valid data or empty data array for table ${tableId}:`, tableData); // Debugging: Warn if no data
+            const tr = tableBody.insertRow();
+            const td = tr.insertCell();
+            td.colSpan = 4; // All these tables have 4 columns (K:N)
+            td.textContent = 'No hay datos para mostrar.';
+            td.style.textAlign = 'center';
+            return;
+        }
+
+        // Render headers (including the 'total-header' class for the last column)
+        const headers = tableData[0];
+        let headerRowHtml = '<tr>';
+        headers.forEach((header, index) => {
+            // La 4ta columna está en el índice 3 (0-indexado)
+            const isTotalColumnHeader = (index === 3); 
+            headerRowHtml += `<th class="${isTotalColumnHeader ? 'total-header' : ''}">${header}</th>`;
+        });
+        headerRowHtml += '</tr>';
+        tableHead.innerHTML = headerRowHtml;
+
+        // Render body rows (skip header row from data, add 'total-cell' class to last column and last row)
+        for (let i = 1; i < tableData.length; i++) { // Empieza desde 1 para saltar la fila de encabezado
+            const row = tableData[i];
+            const tr = tableBody.insertRow();
+            
+            const isLastRow = (i === tableData.length - 1); // Verifica si es la última fila (la fila de totales)
+            if (isLastRow) {
+                tr.classList.add('total-row'); // Añade la clase a toda la fila
+            }
+
+            row.forEach((cell, index) => {
+                const isTotalColumnCell = (index === 3); // La 4ta columna está en el índice 3
+                const td = tr.insertCell();
+                td.textContent = cell;
+                
+                // Si es la columna de totales O si es la última fila (que es la fila de totales)
+                if (isTotalColumnCell || isLastRow) {
+                    td.classList.add('total-cell'); // Añade la clase a la celda
+                }
+            });
+        }
+    }
+
+        // Renderizar tablas para Resumen de Equipos (usando los datos correctos del objeto tablesData)
+        renderEquiposSummaryTable('estadoFlotaTable', tablesData.estadoFlota);
+        renderEquiposSummaryTable('bocinasDanadasTable', tablesData.bocinasDañadas);
+        renderEquiposSummaryTable('estadoModemTable', tablesData.estadoModem);
+        renderEquiposSummaryTable('estadoBocinasTable', tablesData.estadoBocinas);
+
+        // Dibujar Gráficos para Resumen de Equipos (usando los IDs y datos correctos)
+        try {
+            if (google.charts.visualization) { 
+                // chart_estado_flota
+                if (tablesData.estadoFlota && tablesData.estadoFlota.length > 1) { 
+                    drawPieChart(document.getElementById('chart_estado_flota'), 'Estado de Flota', tablesData.estadoFlota);
+                } else {
+                    document.getElementById('chart_estado_flota').innerHTML = '<p style="text-align:center;">No hay datos para el gráfico de Estado de Flota.</p>';
+                }
+
+                // chart_bocinas_danadas
+                if (tablesData.bocinasDañadas && tablesData.bocinasDañadas.length > 1) {
+                    drawPieChart(document.getElementById('chart_bocinas_danadas'), 'Bocinas Dañadas por Patio', tablesData.bocinasDañadas);
+                } else {
+                    document.getElementById('chart_bocinas_danadas').innerHTML = '<p style="text-align:center;">No hay datos para el gráfico de Bocinas Dañadas.</p>';
+                }
+
+                // chart_estado_modem
+                if (tablesData.estadoModem && tablesData.estadoModem.length > 1) {
+                    drawPieChart(document.getElementById('chart_estado_modem'), 'Estado de Módem', tablesData.estadoModem);
+                } else {
+                    document.getElementById('chart_estado_modem').innerHTML = '<p style="text-align:center;">No hay datos para el gráfico de Estado de Módem.</p>';
+                }
+
+                // chart_estado_bocinas
+                if (tablesData.estadoBocinas && tablesData.estadoBocinas.length > 1) {
+                    drawPieChart(document.getElementById('chart_estado_bocinas'), 'Estado de Bocinas', tablesData.estadoBocinas);
+                } else {
+                    document.getElementById('chart_estado_bocinas').innerHTML = '<p style="text-align:center;">No hay datos para el gráfico de Estado de Bocinas.</p>';
+                }
+
+            } else {
+                showToast("Google Charts no se cargó correctamente.");
+            }
+        } catch(e) {
+            console.error("Error al dibujar gráficos de equipos:", e);
+            showToast("No se pudieron mostrar los gráficos de equipos.")
+        }
+    }
+
+    
+    function drawPieChart(element, title, data) {
+        const dataTable = google.visualization.arrayToDataTable(data);
+        const options = { title: title, pieHole: 0.4, backgroundColor: 'transparent' };
+        const chart = new google.visualization.PieChart(element);
+        chart.draw(dataTable, options);
+    }
+
+    function drawBarChart(element, title, data) {
+        const dataTable = google.visualization.arrayToDataTable(data);
+        const options = { title: title, legend: { position: 'none' }, backgroundColor: 'transparent' };
+        const chart = new google.visualization.BarChart(element);
+        chart.draw(dataTable, options);
+    }
+
+    // --- USUARIOS SECTION ---
+    function renderUsuarios(users) {
+        const tableBody = document.getElementById('usuariosTable').querySelector('tbody');
+        tableBody.innerHTML = '';
+        users.forEach(user => {
+            const tr = tableBody.insertRow();
+            tr.insertCell().textContent = user.codigo;
+            tr.insertCell().textContent = user.nombre;
+            const actionTd = tr.insertCell();
+            
+            const editBtn = document.createElement('button');
+            editBtn.textContent = 'Editar';
+            editBtn.onclick = () => showUsuarioForm(user);
+            actionTd.appendChild(editBtn);
+
+            const deleteBtn = document.createElement('button');
+            deleteBtn.textContent = 'Eliminar';
+            deleteBtn.className = 'btn-danger';
+            deleteBtn.style.marginLeft = '10px';
+            deleteBtn.onclick = () => deleteUsuario(user.codigo);
+            actionTd.appendChild(deleteBtn);
+        });
+    }
+
+    function showUsuarioForm(user) {
+        const formContainer = document.getElementById('usuarioFormContainer');
+        const form = document.getElementById('usuarioForm');
+        form.reset();
+
+        if (user) { // Edit mode
+            document.getElementById('usuarioFormTitle').textContent = 'Editar Usuario';
+            document.getElementById('usuarioCodigo').value = user.codigo;
+            document.getElementById('usuarioCodigo').disabled = true; // Code remains disabled for editing
+            document.getElementById('usuarioNombre').value = user.nombre;
+        } else { // Add mode
+            document.getElementById('usuarioFormTitle').textContent = 'Agregar Usuario';
+            document.getElementById('usuarioCodigo').disabled = false;
+            document.getElementById('usuarioCodigo').value = ''; // Clear for new user
+            document.getElementById('usuarioNombre').value = ''; // Clear for new user
+        }
+        formContainer.classList.remove('hidden');
+    }
+
+    function hideUsuarioForm() {
+        document.getElementById('usuarioFormContainer').classList.add('hidden');
+    }
+
+    function handleUsuarioSubmit(event) {
+        event.preventDefault();
+        const userData = {
+            codigo: document.getElementById('usuarioCodigo').value.trim(),
+            nombre: document.getElementById('usuarioNombre').value.trim()
+        };
+        
+        const isEditMode = document.getElementById('usuarioCodigo').disabled;
+        const serverFunction = isEditMode ? 'editarUsuario' : 'agregarUsuario';
+
+        showLoadingOverlay();
+        google.script.run.withSuccessHandler(response => {
+            hideLoadingOverlay();
+            showToast(response.message);
+            if(response.status === 'success') {
+                hideUsuarioForm();
+                loadData('usuarios');
+            }
+        })[serverFunction](userData);
+    }
+    
+    function deleteUsuario(codigo) {
+        if (confirm(`¿Está seguro de que desea eliminar al usuario con código ${codigo}?`)) {
+            showLoadingOverlay();
+            google.script.run.withSuccessHandler(response => {
+                hideLoadingOverlay();
+                showToast(response.message);
+                if (response.status === 'success') {
+                    loadData('usuarios');
+                }
+            }).eliminarUsuario(codigo);
+        }
+    }
+
+    // --- UTILITIES ---
+    function showToast(message) {
+        const toast = document.getElementById("toast");
+        toast.textContent = message;
+        toast.className = "show";
+        setTimeout(() => { toast.className = toast.className.replace("show", ""); }, 3000);
+    }
+
+    function mostrarTablaResumen() {
+        const valor = document.getElementById("tablaResumenSelector").value;
+        document.querySelectorAll(".tabla-resumen").forEach(div => {
+            div.style.display = div.classList.contains(valor) ? "block" : "none";
+        });
+    }
+
+    function mostrarTablaResumenEquipos() {
+        const valor = document.getElementById("tablaEquiposSelector").value;
+        document.querySelectorAll(".tabla-equipos").forEach(div => {
+            div.style.display = div.classList.contains(valor) ? "block" : "none";
+        });
+    }
+
+
+    </script>
+</body>
+</html>
+
+
+FormularioHTML.html
+
+<form id="atencionForm" onsubmit="enviarFormulario(event)">
+    <input type="hidden" id="formRowIndex">
+    <input type="hidden" id="formSource">
+    
+    <h3>Bitácora de Revisiones Diarias-BUSAE</h3>
+
+    <div class="form-section">
+        <h4 class="section-title">Información General</h4>
+        <div class="section-grid">
+            <div class="form-group">
+                <label for="formMovil">Número de Bus</label>
+                <input type="text" id="formMovil" name="movil" readonly>
+            </div>
+            <div class="form-group">
+                <label for="formTipoInventario">Tipo de Mantenimiento</label>
+                <select id="formTipoInventario" name="tipoInventario" required>
+                    <option value="" disabled selected>Seleccione una opción...</option>
+                    <option value="INVENTARIO">Inventario</option>
+                    <option value="REVISION POR BITACORA">Revisión Por Bitácora</option>
+                    <option value="ACTUALIZACION DE FIRMWARE">Actualización de Firmware</option>
+                    <option value="INSTALACION GPS">Instalación Sistema GPS</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="formTecnico">Técnico</label>
+                <select id="formTecnico" name="tecnico" required></select>
+            </div>
+            <fieldset class="form-group">
+                <legend class="fieldset-legend">Patio</legend>
+                <div class="radio-group" id="formPatio">
+                    <label><input type="radio" name="patio" value="CABIMA" required> Cabima</label>
+                    <label><input type="radio" name="patio" value="CHORRILLO"> Chorrillo</label>
+                    <label><input type="radio" name="patio" value="CURUNDU"> Curundú</label>
+                    <label><input type="radio" name="patio" value="LA DOÑA"> La Doña</label>
+                    <label><input type="radio" name="patio" value="LOS PUEBLOS"> Los Pueblos</label>
+                    <label><input type="radio" name="patio" value="OJO DE AGUA"> Ojo de Agua</label>
+                </div>
+            </fieldset>
+        </div>
+    </div>
+
+    <div class="form-section">
+        <h4 class="section-title">Revisión de Componentes</h4>
+        <div class="component-grid">
+            <fieldset><legend class="fieldset-legend">MODEM</legend>
+                <div class="radio-group">
+                    <label><input type="radio" name="modem" value="FUNCIONA" required> FUNCIONA</label>
+                    <label><input type="radio" name="modem" value="DESCONECTADO"> DESCONECTADO</label>
+                    <label><input type="radio" name="modem" value="MOJADO"> MOJADO</label>
+                    <label><input type="radio" name="modem" value="DAÑADO"> DAÑADO</label>
+                    <label><input type="radio" name="modem" value="POR INSTALAR"> POR INSTALAR</label>
+                </div></fieldset>
+            <fieldset><legend class="fieldset-legend">ACTUALIZACION FW</legend>
+                <div class="radio-group">
+                    <label><input type="radio" name="modemA" value="POR ACTUALIZAR" required> POR ACTUALIZAR</label>
+                    <label><input type="radio" name="modemA" value="ACTUALIZADO"> ACTUALIZADO</label>
+                </div></fieldset>
+            <fieldset><legend class="fieldset-legend">BOCINA</legend>
+                <div class="radio-group">
+                    <label><input type="radio" name="bocina" value="FUNCIONA" required> FUNCIONA</label>
+                    <label><input type="radio" name="bocina" value="VANDALISMO ROBADA"> ROBADA</label>
+                    <label><input type="radio" name="bocina" value="DAÑADA"> DAÑADA</label>
+                    <label><input type="radio" name="bocina" value="POR INSTALAR"> POR INSTALAR</label>
+                </div></fieldset>
+            <fieldset><legend class="fieldset-legend">ADECUACION BOCINA</legend>
+                <div class="radio-group">
+                    <label><input type="radio" name="bocinaA" value="POR ADECUAR"> POR ADECUAR</label>
+                    <label><input type="radio" name="bocinaA" value="ADECUADA"> ADECUADA O MOVILIZADA</label>
+                </div></fieldset>
+            <fieldset><legend class="fieldset-legend">BOCINA/CARCASA</legend>
+                <div class="radio-group">
+                    <label><input type="radio" name="bocinaC" value="INSTALADA" required> INSTALADA</label>
+                    <label><input type="radio" name="bocinaC" value="NO TIENE"> NO TIENE</label>
+                </div></fieldset>
+            <fieldset><legend class="fieldset-legend">BOCINA/REGULADOR</legend>
+                <div class="radio-group">
+                    <label><input type="radio" name="bocinaR" value="FUNCIONA" required> FUNCIONA</label>
+                    <label><input type="radio" name="bocinaR" value="DAÑADO"> DAÑADO</label>
+                    <label><input type="radio" name="bocinaR" value="POR INSTALAR"> POR INSTALAR</label>
+                </div></fieldset>
+            <fieldset><legend class="fieldset-legend">BOTON DE LLAMADA</legend>
+                <div class="radio-group">
+                    <label><input type="radio" name="botonLlamada" value="FUNCIONA" required> FUNCIONA</label>
+                    <label><input type="radio" name="botonLlamada" value="DAÑADO"> DAÑADO</label>
+                    <label><input type="radio" name="botonLlamada" value="POR INSTALAR"> POR INSTALAR</label>
+                </div></fieldset>
+            <fieldset><legend class="fieldset-legend">BOTON DE PANICO</legend>
+                <div class="radio-group">
+                    <label><input type="radio" name="botonPanico" value="FUNCIONA" required> FUNCIONA</label>
+                    <label><input type="radio" name="botonPanico" value="DAÑADO"> DAÑADO</label>
+                    <label><input type="radio" name="botonPanico" value="POR INSTALAR"> POR INSTALAR</label>
+                </div></fieldset>
+            <fieldset><legend class="fieldset-legend">SIM CARD</legend>
+                <div class="radio-group">
+                    <label><input type="radio" name="simCard" value="ACTIVA" required> ACTIVA</label>
+                    <label><input type="radio" name="simCard" value="NO GPRS"> NO GPRS</label>
+                    <label><input type="radio" name="simCard" value="VANDALISMO SUSTRAIDA O ROBADA"> ROBADA</label>
+                    <label><input type="radio" name="simCard" value="POR INSTALAR"> POR INSTALAR</label>
+                </div></fieldset>
+            <fieldset><legend class="fieldset-legend">ANILLO</legend>
+                <div class="radio-group">
+                    <label><input type="radio" name="anillo" value="FUNCIONA" required> FUNCIONA</label>
+                    <label><input type="radio" name="anillo" value="DAÑADO"> DAÑADO</label>
+                    <label><input type="radio" name="anillo" value="SE AJUSTO"> SE AJUSTO</label>
+                    <label><input type="radio" name="anillo" value="POR INSTALAR"> POR INSTALAR</label>
+                </div></fieldset>
+            <fieldset><legend class="fieldset-legend">CTAP</legend>
+                <div class="radio-group">
+                    <label><input type="radio" name="ctap" value="FUNCIONA" required> FUNCIONA</label>
+                    <label><input type="radio" name="ctap" value="DAÑADO"> DAÑADO</label>
+                    <label><input type="radio" name="ctap" value="EXTRAVIADO"> EXTRAVIADO</label>
+                    <label><input type="radio" name="ctap" value="SE AJUSTO"> SE AJUSTO</label>
+                    <label><input type="radio" name="ctap" value="POR INSTALAR"> POR INSTALAR</label>
+                </div></fieldset>
+        </div>
+    </div>
+
+    <div class="form-section">
+        <h4 class="section-title">Identificadores y Series</h4>
+        <div class="section-grid">
+            <div class="form-group"><label for="formIMEI">IMEI BUSAE</label><input type="text" id="formIMEI" name="imei" pattern="\d{15}" title="El IMEI debe tener 15 dígitos"></div>
+            <div class="form-group"><label for="formSerieSim">Serie Sim Card</label><input type="text" id="formSerieSim" name="serieSim" pattern="\d+" title="La serie SIM debe contener solo números"></div>
+            <div class="form-group"><label for="formSerieCtap">Serie de CTAP</label><input type="text" id="formSerieCtap" name="serieCtap" pattern="\d+" title="La serie CTAP debe contener solo números"></div>
+        </div>
+    </div>
+
+    <div class="form-section">
+        <div class="form-group full-width">
+            <label for="formRespuestaTecnica">Respuesta Técnica / Observaciones</label>
+            <textarea id="formRespuestaTecnica" name="respuestaTecnica" rows="5" required placeholder="Describa el trabajo realizado..."></textarea>
+        </div>
+    </div>
+
+    <div class="form-actions" style="margin-top:20px; display:flex; gap:15px; justify-content:flex-end;">
+        <button type="button" id="btnCancelarForm" class="btn-secondary" onclick="cancelarFormulario()">Cancelar</button>
+        <button type="submit" id="btnEnviarForm">Enviar Bitácora</button>
+    </div>
+</form>

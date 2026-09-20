@@ -1,0 +1,363 @@
+<!DOCTYPE html><html lang="en"><head>
+        <meta charset="UTF-8">
+        <meta name="robots" content="noindex, nofollow">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="csrf-param" content="_csrf">
+<meta name="csrf-token" content="-q6uaO1Qc0NKwOFeSZGlzfMlkltVxpyWZssqOHOUgAac1vYqoxQHEij2sREf8pCskGv6DjSu9t0s-WF7Ju3oPg==">
+                <link rel="shortcut icon" href="/favicon.ico" type="image/x-icon">
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+        <title>Login</title>
+        <link href="/static/adminlte/css/demo.css" rel="stylesheet">
+<link href="/static/adminlte/css/pushy.css" rel="stylesheet">
+<link href="/static/adminlte/css/login-style.css" rel="stylesheet">
+<link href="/assets/6b481528/authchoice.css" rel="stylesheet">
+<link href="/assets/2a2343f9/css/bootstrap.css" rel="stylesheet">
+<link href="/css/cookie-consent.css" rel="stylesheet">
+<style>html, body {
+	background: #fff!important;
+	-webkit-box-shadow: inset 0 0 100px rgba(0,0,0,.5);
+	box-shadow: inset 0 0 100px rgba(0,0,0,.5);
+	height: 100%;
+	min-height: 100%;
+	position: relative;
+}
+#login-wrapper {
+	position: relative;
+	top:8%;
+}
+#login-wrapper .registration-block {
+	margin-top: 15px;
+}
+.login-legal-links {
+	margin: 30px 0 20px;
+	padding: 0 15px;
+	text-align: center;
+	font-size: 13px;
+	color: #6b7c8c;
+}
+.login-legal-links a {
+	color: #125781;
+	text-decoration: underline;
+}</style>        
+    </head>
+    <body class="user_login_register">
+        
+        <style>
+    .language-block {
+        color: black;
+        float: right;
+        font-size: 14px;
+        font-weight: normal;
+        margin: 0 15px 0 0;
+        padding: 0;
+    }
+    .language-block select {
+        -moz-appearance: none;
+        background: rgba(0, 0, 0, 0) url("../../images/blue-select-down-arrow.png") no-repeat scroll right -8px;
+        border: 1px solid #ddd;
+        height: 30px;
+        margin-top: -3px;
+        padding: 0 9px !important;
+        width: 65px;
+        line-height: 30px;
+    }
+</style>
+
+<div class="custome-login-wrapper">
+    <header>
+        <div class="custom-login-header">
+            <h1>Welcome to Busae</h1>
+            
+<div class="language-block">
+    <!--<div class="lang-label">Language</div>-->
+    <!--<form action="https://login.busae.com/site/switch-language" method="post">
+<input type="hidden" name="_csrf" value="-q6uaO1Qc0NKwOFeSZGlzfMlkltVxpyWZssqOHOUgAac1vYqoxQHEij2sREf8pCskGv6DjSu9t0s-WF7Ju3oPg==">-->
+    <form action="/site/switch-language" method="post">
+<input type="hidden" name="_csrf" value="-q6uaO1Qc0NKwOFeSZGlzfMlkltVxpyWZssqOHOUgAac1vYqoxQHEij2sREf8pCskGv6DjSu9t0s-WF7Ju3oPg==">    <!--<form action="site/switch-language" method="post">
+<input type="hidden" name="_csrf" value="-q6uaO1Qc0NKwOFeSZGlzfMlkltVxpyWZssqOHOUgAac1vYqoxQHEij2sREf8pCskGv6DjSu9t0s-WF7Ju3oPg==">-->
+
+    <input type="hidden" name="redirectTo" value="/user-management/auth/login">
+	<select name="language_code" onchange="this.form.submit();">    <option value="en" selected="">En</option>
+<option value="es">Es</option>
+<option value="fr">Fr</option>    </select></form></div>
+        </div>
+    </header>
+    <div class="login_register">
+
+        <div class="container">
+            <div class="acess_block">
+                <div class="row">
+                      <!-- <div class="col-xs-12 col-sm-5">
+                        <div class="register_block">
+                            <form id="frm-register" action="/user/register" method="post" enctype="multipart/form-data">
+<input type="hidden" name="_csrf" value="-q6uaO1Qc0NKwOFeSZGlzfMlkltVxpyWZssqOHOUgAac1vYqoxQHEij2sREf8pCskGv6DjSu9t0s-WF7Ju3oPg==">                            <h2>
+                                Register                            </h2>
+                            <div class="form-group">
+                                <div class="ttl_label field-user-email required">
+<label class="control-label" for="user-email">E-mail</label>
+<input type="text" id="user-email" class="form-control" name="User[email]" autocomplete="off" aria-required="true">
+
+<p class="help-block help-block-error"></p>
+</div>                            </div>
+                            <div class="form-group">
+                                <div class="ttl_label field-user-password_hash required">
+<label class="control-label" for="user-password_hash">Password</label>
+<input type="password" id="user-password_hash" class="form-control" name="User[password_hash]" autocomplete="off" aria-required="true">
+
+<p class="help-block help-block-error"></p>
+</div>                            </div>
+                            <div class="form-group">
+                                <div class="ttl_label field-user-verify_password required">
+<label class="control-label" for="user-verify_password">Verify Password</label>
+<input type="password" id="user-verify_password" class="form-control" name="User[verify_password]" autocomplete="off" aria-required="true">
+
+<p class="help-block help-block-error"></p>
+</div>                            </div>
+                            <div class="acess_button">
+                                <div class="term-text">*
+                                    Legal advise, Terms & Condition                                </div>
+                                <div id="button_update_delete">
+                                    <button type="submit" id="submit_reg" class="btn btn-blue">Register</button>                                    <!--Html::a(Yii::t('app', 'Cancel'), ['user/index'], ['class' => 'btn btn-danger'])
+                                </div>
+                            </div>
+                            </form>                        </div>
+                    </div>
+                    <div class="col-xs-12 col-sm-2 mobile_hide">
+                        <div class="spareter_block"><div class="spareter"></div></div>
+                    </div>-->
+                    <div class="col-xs-12 col-sm-6 col-sm-offset-3">
+                        <div class="login_block">
+                            <h2>
+                                Login                            </h2>
+                            <form id="login-page" action="/user-management/auth/login" method="post" autocomplete="off">
+<input type="hidden" name="_csrf" value="-q6uaO1Qc0NKwOFeSZGlzfMlkltVxpyWZssqOHOUgAac1vYqoxQHEij2sREf8pCskGv6DjSu9t0s-WF7Ju3oPg==">                            <div class="form-group">
+                                <label for="" class="control-label">Email</label>
+                                <div class="form-group field-loginform-username required">
+<input type="text" id="loginform-username" class="form-control" name="LoginForm[username]" autocomplete="off" aria-required="true">
+<p class="help-block help-block-error"></p>
+</div>                            </div>
+                            <div class="form-group">
+                                <label for="" class="control-label">Password</label>
+                                <div class="form-group field-loginform-password required">
+<input type="password" id="loginform-password" class="form-control" name="LoginForm[password]" autocomplete="off" aria-required="true">
+<p class="help-block help-block-error"></p>
+</div>                            </div>
+                                                        <div class="form-group" style="display: none;">
+                                <div class="form-group field-loginform-rememberme">
+<div class="checkbox">
+<label for="loginform-rememberme">
+<input type="hidden" name="LoginForm[rememberMe]" value="0"><input type="checkbox" id="loginform-rememberme" name="LoginForm[rememberMe]" value="1">
+Keep me logged in
+</label>
+<p class="help-block help-block-error"></p>
+
+</div>
+</div>                            </div>
+                            <div class="ttl_forgot">
+                                <a href="/user-management/auth/password-recovery" class="link">
+                                    Forgot your password?                                </a>
+                            </div>
+                            <div class="fb-btn-box" style="visibility: hidden;">
+                                <div id="w0"><ul class="auth-clients"><li><a class="facebook auth-link" href="/site/auth?authclient=facebook" title="Facebook"><span class="auth-icon facebook"></span></a></li></ul></div>                            </div>
+                                                        <div id="login-wait-message" class="alert alert-warning text-center" style="display: none; margin-top: 10px;"></div>
+                            <div class="acess_button login_access">
+                                <button type="submit" id="submit_login" class="btn btn-blue ">Login</button>                            </div>
+                        </form></div>
+                                            </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="login-legal-links">
+    <a href="/policy/index">Privacy Policy</a>    <span aria-hidden="true">·</span>
+    <a href="/policy/cookies">Cookie Policy</a>    <span aria-hidden="true">·</span>
+    <a href="#" data-cc-open="">Cookie settings</a></div>
+
+
+                <div id="busae-cookie-consent" class="busae-cc">
+
+    <div class="busae-cc__banner" data-cc-banner="" role="region" aria-label="Cookie settings">
+        <div class="busae-cc__banner-inner">
+            <div class="busae-cc__text">
+                <p class="busae-cc__title">We use cookies</p>
+                <p class="busae-cc__description">
+                    We use cookies that are strictly necessary for the site to work, plus analytics and advertising cookies that are only installed if you allow them. You can accept them all, reject the optional ones, or choose which ones you allow.                    <a class="busae-cc__link" href="/policy/cookies">Cookie Policy</a>                </p>
+            </div>
+            <div class="busae-cc__actions">
+                <button type="button" class="busae-cc__btn busae-cc__btn--link" data-cc-action="settings">
+                    Configure                </button>
+                <button type="button" class="busae-cc__btn busae-cc__btn--secondary" data-cc-action="reject">
+                    Reject all                </button>
+                <button type="button" class="busae-cc__btn busae-cc__btn--primary" data-cc-action="accept">
+                    Accept all                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="busae-cc__overlay" data-cc-overlay="" data-cc-action="close-settings" hidden=""></div>
+
+    <div class="busae-cc__panel" data-cc-panel="" role="dialog" aria-modal="true" aria-labelledby="busae-cc-panel-title" hidden="">
+        <div class="busae-cc__panel-header">
+            <h2 class="busae-cc__panel-title" id="busae-cc-panel-title">
+                Cookie settings            </h2>
+            <button type="button" class="busae-cc__close" data-cc-action="close-settings" aria-label="Close">×</button>
+        </div>
+
+        <div class="busae-cc__panel-body">
+            <p class="busae-cc__intro">
+                Choose which cookies you allow. Your choice is saved for one year and you can change it whenever you want.                <a class="busae-cc__link" href="/policy/cookies">Cookie Policy</a>            </p>
+
+            <div class="busae-cc__group">
+                <div class="busae-cc__group-header">
+                    <h3 class="busae-cc__group-title">Strictly necessary cookies</h3>
+                    <span class="busae-cc__always">Always active</span>
+                </div>
+                <p class="busae-cc__group-text">
+                    They let you sign in, keep your session open and protect the forms. Without them the site cannot work, so they cannot be turned off.                </p>
+            </div>
+
+            <div class="busae-cc__group">
+                <div class="busae-cc__group-header">
+                    <h3 class="busae-cc__group-title">Analytics cookies</h3>
+                    <label class="busae-cc__switch">
+                        <input type="checkbox" data-cc-category="analytics" aria-label="Analytics cookies">
+                        <span class="busae-cc__switch-slider"></span>
+                    </label>
+                </div>
+                <p class="busae-cc__group-text">
+                    They let us count visits and see how the site is used so we can improve it. The information is collected in aggregate form through Google Analytics.                </p>
+            </div>
+
+            <div class="busae-cc__group">
+                <div class="busae-cc__group-header">
+                    <h3 class="busae-cc__group-title">Advertising cookies</h3>
+                    <label class="busae-cc__switch">
+                        <input type="checkbox" data-cc-category="marketing" aria-label="Advertising cookies">
+                        <span class="busae-cc__switch-slider"></span>
+                    </label>
+                </div>
+                <p class="busae-cc__group-text">
+                    They let us measure the effectiveness of our advertising campaigns through Google Ads.                </p>
+            </div>
+        </div>
+
+        <div class="busae-cc__panel-footer">
+            <button type="button" class="busae-cc__btn busae-cc__btn--secondary" data-cc-action="reject">
+                Reject all            </button>
+            <button type="button" class="busae-cc__btn busae-cc__btn--secondary" data-cc-action="save">
+                Save preferences            </button>
+            <button type="button" class="busae-cc__btn busae-cc__btn--primary" data-cc-action="accept">
+                Accept all            </button>
+        </div>
+    </div>
+
+</div>
+
+        <script src="/assets/ab366128/jquery.js"></script>
+<script src="/static/adminlte/js/pushy.min.js"></script>
+<script src="/static/adminlte/js/custom-menu.js"></script>
+<script src="/assets/e7e7d789/yii.js"></script>
+<script src="/assets/e7e7d789/yii.validation.js"></script>
+<script src="/assets/e7e7d789/yii.activeForm.js"></script>
+<script src="/js/cookie-consent.js"></script>
+<script>if (window.BusaeCookieConsent) {
+    window.BusaeCookieConsent.onChange(function (consent) {
+        if (!consent.marketing || window.busaeAdsConversionLoaded) {
+            return;
+        }
+        window.busaeAdsConversionLoaded = true;
+        var conversion = {"google_conversion_id":880462892,"google_conversion_language":"en","google_conversion_format":"3","google_conversion_color":"ffffff","google_conversion_label":"nDd3CNCpvHUQrJjrowM","google_remarketing_only":false};
+        Object.keys(conversion).forEach(function (key) {
+            window[key] = conversion[key];
+        });
+        var script = document.createElement('script');
+        script.async = true;
+        script.src = 'https://www.googleadservices.com/pagead/conversion.js';
+        document.body.appendChild(script);
+    });
+}
+window.BusaeCookieConsent.init({"cookieName":"busae_cookie_consent","version":1,"lifetimeDays":365,"secure":true,"analyticsProperty":"UA-106390499-1","analyticsPage":null});</script>
+<script>jQuery(function ($) {
+
+        
+       
+        var current = $('select[name=language_code]').val();    
+        
+        //        var langstr = navigator.language || navigator.userLanguage;
+        var langstr = '';
+        
+        var l = langstr.split('-');
+        
+        var val = 'en';
+        
+        if(l[0] == 'fr'){
+            val = 'fr';
+        }else if(l[0] == 'es'){
+            val = 'es';
+        }
+        
+        var userLang = ''
+           
+        if(userLang == '' && val != 'en'){
+            $('select[name=language_code]').val(val).change();    
+        }
+
+        if(val != 'en'){
+            SetUserBrowserSession(val);
+        }
+       
+
+        $('select[name=language_code]').change(function(){
+            var current = $('select[name=language_code]').val(); 
+         
+            if(val != userLang){
+                $('select[name=language_code]').val(val).change();    
+            }
+        
+            SetUserBrowserSession(val);
+            
+        });
+
+
+
+        function SetUserBrowserSession(val){
+        
+            $.ajax({
+               url: '/site/set-lang',
+               type: 'get',
+               data: {
+                         user_browser_lang: val,                      
+                         _csrf : '-q6uaO1Qc0NKwOFeSZGlzfMlkltVxpyWZssqOHOUgAac1vYqoxQHEij2sREf8pCskGv6DjSu9t0s-WF7Ju3oPg=='
+                     },
+                success: function (data) {
+                  console.log('success');
+               }
+            }); 
+
+
+        }
+    
+    
+jQuery('#frm-register').yiiActiveForm([{"id":"user-email","name":"email","container":".field-user-email","input":"#user-email","error":".help-block.help-block-error","enableAjaxValidation":true,"validate":function (attribute, value, messages, deferred, $form) {yii.validation.required(value, messages, {"message":"E-mail cannot be blank."});yii.validation.email(value, messages, {"pattern":/^[a-zA-Z0-9!#$%&'*+\/=?^_`{|}~-]+(?:\.[a-zA-Z0-9!#$%&'*+\/=?^_`{|}~-]+)*@(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?$/,"fullPattern":/^[^@]*<[a-zA-Z0-9!#$%&'*+\/=?^_`{|}~-]+(?:\.[a-zA-Z0-9!#$%&'*+\/=?^_`{|}~-]+)*@(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?>$/,"allowName":false,"message":"E-mail is not a valid email address.","enableIDN":false,"skipOnEmpty":1});yii.validation.string(value, messages, {"message":"E-mail must be a string.","max":128,"tooLong":"E-mail should contain at most 128 characters.","skipOnEmpty":1});}},{"id":"user-password_hash","name":"password_hash","container":".field-user-password_hash","input":"#user-password_hash","error":".help-block.help-block-error","enableAjaxValidation":true,"validate":function (attribute, value, messages, deferred, $form) {yii.validation.required(value, messages, {"message":"Password cannot be blank."});yii.validation.string(value, messages, {"message":"Password must be a string.","min":12,"tooShort":"Password should contain at least 12 characters.","skipOnEmpty":1});yii.validation.string(value, messages, {"message":"Password must be a string.","max":64,"tooLong":"Password should contain at most 64 characters.","skipOnEmpty":1});yii.validation.regularExpression(value, messages, {"pattern":/(?=.*\d)(?=.*[a-z])(?=.*[A-Z]).{6,}/,"not":false,"message":"Your password must have atleast 1 lowercase, 1 uppercase and 1 number combination","skipOnEmpty":1});}},{"id":"user-verify_password","name":"verify_password","container":".field-user-verify_password","input":"#user-verify_password","error":".help-block.help-block-error","enableAjaxValidation":true,"validate":function (attribute, value, messages, deferred, $form) {yii.validation.required(value, messages, {"message":"Verify Password cannot be blank."});yii.validation.string(value, messages, {"message":"Verify Password must be a string.","min":12,"tooShort":"Verify Password should contain at least 12 characters.","skipOnEmpty":1});yii.validation.string(value, messages, {"message":"Verify Password must be a string.","max":64,"tooLong":"Verify Password should contain at most 64 characters.","skipOnEmpty":1});yii.validation.compare(value, messages, {"operator":"==","type":"string","compareAttribute":"user-password_hash","compareAttributeName":"User[password_hash]","message":"Password doesn't match"}, $form);}}], []);
+jQuery('#login-page').yiiActiveForm([{"id":"loginform-username","name":"username","container":".field-loginform-username","input":"#loginform-username","error":".help-block.help-block-error","validateOnBlur":false,"validate":function (attribute, value, messages, deferred, $form) {yii.validation.required(value, messages, {"message":"Login cannot be blank."});}},{"id":"loginform-password","name":"password","container":".field-loginform-password","input":"#loginform-password","error":".help-block.help-block-error","validateOnBlur":false,"validate":function (attribute, value, messages, deferred, $form) {yii.validation.required(value, messages, {"message":"Password cannot be blank."});}},{"id":"loginform-rememberme","name":"rememberMe","container":".field-loginform-rememberme","input":"#loginform-rememberme","error":".help-block.help-block-error","validateOnBlur":false,"validate":function (attribute, value, messages, deferred, $form) {yii.validation.boolean(value, messages, {"trueValue":"1","falseValue":"0","message":"Remember me must be either \"1\" or \"0\".","skipOnEmpty":1});}}], []);
+ 
+    $('#submit_reg').click(function(){
+        $('#frm-register').submit();
+        $(this).prop('disabled', true);
+        setTimeout(function(){ 
+            $('#submit_reg').prop('disabled', false);
+        }, 1000);
+    }); 
+    $('#submit_login').click(function(){
+        $('#login-page').submit();
+        $(this).prop('disabled', true);
+        setTimeout(function(){
+            $('#submit_login').prop('disabled', false);
+        }, 1000);
+    });
+
+});</script>    
+
+</body></html>

@@ -1,0 +1,200 @@
+# PROMPT MAESTRO INTEGRAL: SISTEMA ENTERPRISE DE BITÁCORA, E.E. MÓVILES Y ANALYTICS DE FLOTA
+
+## 1. CONTEXTO Y OBJETIVO DEL SISTEMA
+Actúa como un Principal Full-Stack Systems Architect Senior especializado en Python 3.12, Django 5, PostgreSQL 16 (JSONB + GIN Indexing), Redis, Celery y React 18 (Vite, Tailwind CSS, TanStack Query, Recharts).
+
+Debes diseñar y construir una aplicación web Enterprise totalmente independiente, modular y escalable para la gestión de **Bitácoras Técnicas, Equipamiento Embarcado (E.E. Móviles) y Reportes Avanzados de Flota**.
+
+El sistema debe:
+1. Sincronizar automáticamente datos de telemetría desde APIs externas (BUSAE GPS y Genesis) mediante tareas en segundo plano con Celery y Playwright.
+2. Incorporar un **Motor de Esquema Dinámico (Dynamic Form Engine)** que permita al Administrador agregar, modificar o eliminar campos en formularios y tablas directamente desde la App Web sin ejecutar migraciones ni reiniciar el servidor.
+3. Entregar reportes estadísticos y gráficos agregados por rangos de fechas con opción de exportación masiva.
+
+---
+
+## 2. ARQUITECTURA DE BASE DE DATOS Y MOTOR DINÁMICO (POSTGRESQL JSONB/GIN)
+
+Implementa en `buses/models.py` la persistencia híbrida, guardando campos estándar en columnas nativas y campos creados desde la web en un objeto `JSONB` indexado:
+
+```python
+from django.db import models
+from django.contrib.postgres.indexes import GinIndex
+from django.contrib.auth.models import AbstractUser
+
+# ── 1. USUARIOS Y ROLES ──
+class Usuario(AbstractUser):
+    codigo_empleado = models.CharField(max_length=20, unique=True, db_index=True)
+    patio_asignado = models.CharField(max_length=100, blank=True)
+    cuota_diaria = models.IntegerField(default=20)
+    es_admin = models.BooleanField(default=False)
+
+# ── 2. CONFIGURADOR DE CAMPOS DINÁMICOS DESDE LA WEB ──
+class ModuloDinamico(models.Model):
+    nombre = models.CharField(max_length=50, unique=True) # 'bitacora', 'ee_moviles', 'incidencias'
+    descripcion = models.TextField(blank=True)
+
+class CampoConfiguracion(models.Model):
+    TIPOS = [
+        ('TEXT', 'Texto corto'), ('TEXTAREA', 'Texto largo'),
+        ('NUMBER', 'Número'), ('SELECT', 'Lista de opciones'),
+        ('MULTISELECT', 'Multi-Selección'), ('BOOLEAN', 'Booleano (Sí/No)'),
+        ('DATE', 'Fecha'), ('FILE', 'Adjunto/Imagen')
+    ]
+    modulo = models.ForeignKey(ModuloDinamico, on_delete=models.CASCADE, related_name='campos')
+    clave = models.SlugField(max_length=50) # Key interna JSONB ej: "fase_bocina"
+    etiqueta = models.CharField(max_length=100) # Label UI ej: "Fase de Instalación Bocina"
+    tipo = models.CharField(max_length=20, choices=TIPOS)
+    opciones = models.JSONField(default=list, blank=True) # ["Fase 1", "Fase 2"]
+    validaciones = models.JSONField(default=dict, blank=True) # {"min": 0, "regex": "..."}
+    requerido = models.BooleanField(default=False)
+    orden = models.IntegerField(default=0)
+
+    class Meta:
+        unique_together = ('modulo', 'clave')
+        ordering = ['orden']
+
+# ── 3. EQUIPAMIENTO EMBARCADO (E.E. MOVILES) ──
+class EEMovil(models.Model):
+    bus_movil = models.IntegerField(unique=True, db_index=True)
+    fase_instalacion = models.CharField(max_length=50, blank=True)
+    fase_bocina = models.CharField(max_length=50, blank=True)
+    version_firmware = models.CharField(max_length=50, blank=True)
+    estado_fw = models.CharField(max_length=50, blank=True)
+    
+    # Campo JSONB para guardar atributos creados desde la Web
+    datos_dinamicos = models.JSONField(default=dict, blank=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [GinIndex(fields=['datos_dinamicos'])]
+
+# ── 4. REVISIÓN Y BITÁCORA ──
+class RegistroBitacora(models.Model):
+    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+    bus_movil = models.IntegerField(db_index=True)
+    patio = models.CharField(max_length=100, db_index=True)
+    tecnico = models.ForeignKey(Usuario, on_delete=models.PROTECT)
+    tipo_mantenimiento = models.CharField(max_length=50)
+    
+    # Respuestas a los campos dinámicos del formulario
+    datos_dinamicos = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        indexes = [GinIndex(fields=['datos_dinamicos'])]
+
+3. LOS 7 MÓDULOS DE LA APLICACIÓN WEB
+Dashboard y Reportes Avanzados (OLAP Engine):
+
+Selector de rangos de fechas arbitrarios (fecha_inicio a fecha_fin) y agrupadores de período (Diario, Semanal, Mensual, Anual).
+
+Botón de Exportación Asíncrona (CSV / Excel / PDF) procesado en Celery.
+
+Gráficos Recharts:
+
+Reporte de Estado de Componentes: Módems, bocinas, botones de emergencia, SIMs.
+
+Reporte de Incidencias de Móviles: Historial de vandalismo y fallas.
+
+Reporte de Rendimiento de Técnicos: Revisiones realizadas vs cuota_diaria (evaluado con corte de turno a las 08:00 AM).
+
+Reporte de Buses sin Transmisión: Curva de desconexión GPS acumulada.
+
+Bitácora (Bandeja Diaria de Atenciones):
+
+Lista interactiva de incidencias y buses pendientes por atender en el día.
+
+Formulario de revisión que carga dinámicamente los campos nativos + los campos creados desde la web.
+
+Historial de Reportes:
+
+Auditoría histórica completa con filtros multicriterio (fecha, móvil, patio, técnico, estado de componente).
+
+Datos de Genesis:
+
+Servicio en segundo plano para extraer origen, destino, hora de entrada y cálculo de patio de ubicación.
+
+Datos de BUSAE:
+
+Poller asíncrono con Playwright headless para capturar coordenadas GPS en vivo, estado, manos libres y teléfonos.
+
+Datos E.E. Móviles (Equipamiento Embarcado):
+
+Panel de control para hardware embarcado: Fases de instalación, adecuación de bocinas/carcasas, versión de firmware y validadores. Admite campos dinámicos editables desde la App Web.
+
+Usuarios y Roles:
+
+CRUD para técnicos y administradores: Código, Nombre, Patio asignado, Rol y Cuota Diaria.
+
+4. FRONTEND COMPONENTS (REACT 18)
+SchemaEditorPage.jsx: Vista donde el Administrador agrega/edita campos en cualquier módulo (etiqueta, tipo de dato, dropdowns y validaciones).
+
+DynamicFormRenderer.jsx: Componente dinámico usando React Hook Form + Zod que interpreta la configuración activa y renderiza los inputs en tiempo real.
+
+ReportesPage.jsx: Tablero interactivo con filtros temporales, gráficos de Recharts y descarga de datos.
+
+5. ECOSISTEMA Y DESPLIEGUE AUTOMÁTICO
+Genera y ejecuta los scripts para levantar el entorno de desarrollo completo:
+
+A. Archivo docker-compose.yml
+YAML
+version: '3.8'
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: bitacora_postgres
+    restart: always
+    environment:
+      POSTGRES_DB: bitacora_db
+      POSTGRES_USER: bitacora_user
+      POSTGRES_PASSWORD: enterprise_password_2026
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+  redis:
+    image: redis:7-alpine
+    container_name: bitacora_redis
+    restart: always
+    ports:
+      - "6379:6379"
+volumes:
+  pgdata:
+B. Script de Instalación Automatizada (setup_env.sh)
+Bash
+#!/bin/bash
+set -e
+echo "🚀 Levantando servicios Docker..."
+docker-compose up -d
+python3 -m venv venv
+source venv/bin/activate
+pip install --upgrade pip
+pip install Django djangorestframework psycopg2-binary celery redis \
+            django-cors-headers djangorestframework-simplejwt \
+            django-filter pandas openpyxl reportlab playwright requests
+playwright install chromium
+cd frontend
+npm install react react-dom react-router-dom axios recharts \
+            @tanstack/react-query lucide-react clsx tailwindcss \
+            react-hook-form zod
+echo "✅ Entorno configurado correctamente."
+6. ENTREGABLES DE CÓDIGO
+Escribe y genera en orden:
+
+Los modelos en buses/models.py (con CampoConfiguracion y JSONB).
+
+Las vistas agregadas en buses/views.py para reportes por rango de fechas (TruncDay, TruncMonth) y la transacción atómica de atención.
+
+El frontend React con SchemaEditorPage.jsx y DynamicFormRenderer.jsx.
+
+Los archivos docker-compose.yml y setup_env.sh.
+
+
+***
+
+### Instrucciones de Ejecución
+1. Copia todo el bloque de texto superior.
+2. Pégalo directamente en la consola o chat de **Antigravity**.
+3. La IA procesará la arquitectura completa, creará los archivos backend (`models.py`, `views.py`), componentes frontend (`DynamicFormRenderer.jsx`), endpoints de reportes OLAP y desplegará los contenedores Docker automáticamente.
+
+
+EEmibus  AdminEE

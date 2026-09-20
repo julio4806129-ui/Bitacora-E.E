@@ -1,0 +1,16 @@
+Django>=5.0
+djangorestframework
+psycopg2-binary
+celery[redis]
+redis
+django-cors-headers
+djangorestframework-simplejwt
+django-filter
+pandas
+openpyxl
+reportlab
+playwright
+requests
+gunicorn
+pydantic>=2.0
+sentry-sdk>=2.0
