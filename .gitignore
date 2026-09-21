@@ -1,0 +1,78 @@
+# =========================
+# Bitácora E.E. - .gitignore
+# =========================
+
+# Python / Django
+__pycache__/
+*.py[cod]
+*.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+db.sqlite3
+db.sqlite3-journal
+*.log
+local_settings.py
+staticfiles/
+media/
+!media/.gitkeep
+
+# Entornos virtuales
+env/
+venv/
+.venv/
+ENV/
+
+# Variables de entorno y secretos
+.env
+.env.local
+.env.*.local
+backend/.env
+*.pem
+*.key
+
+# Celery
+celerybeat-schedule
+celerybeat-schedule-*
+*.pid
+
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+node_modules/
+dist/
+*.zip
+frontend.zip
+
+# Logs
+logs/
+backend/logs/
+*.log
+
+# Playwright / tests
+test-results/
+playwright-report/
+.playwright/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporales y debug
+*.tmp
+*.temp
+backend/media/tmp/
+backend/busae_login_*.html
+backend/busae_login_*.png
+
+# Archivos de configuración incorrectos
+backend/.gitignore.txt
