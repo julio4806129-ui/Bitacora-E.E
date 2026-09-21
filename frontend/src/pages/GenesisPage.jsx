@@ -59,14 +59,16 @@ export default function GenesisPage() {
     ordering: sortDir === 'desc' ? `-${sortKey}` : sortKey,
   };
 
-  const { data, isLoading, isFetching, refetch } = useQuery({
-    queryKey: ['datos-genesis', queryParams],
-    queryFn: async () => {
-      const res = await apiClient.get('/datos-genesis/', { params: queryParams });
-      return res;
-    },
-    refetchInterval: 30000,
-  });
+  const { data, isLoading, isFetching, refetch, dataUpdatedAt } = useQuery({
+  queryKey: ['datos-genesis', queryParams],
+  queryFn: async () => {
+    const res = await apiClient.get('/datos-genesis/', { params: queryParams });
+    return res;
+  },
+  staleTime: 20_000,
+  refetchInterval: 30_000,  // cada 30 s
+  refetchIntervalInBackground: false,
+});
 
   const genesisList = data?.results || (Array.isArray(data) ? data : []);
   const totalCount = data?.count || genesisList.length;

@@ -85,7 +85,7 @@ def latest_genesis(bus_movil):
 
 
 def genesis_cross_fields(genesis):
-    patio = 'Patio Curundu'
+    patio = ''
     hora = ''
     if genesis:
         if genesis.patio_ubicacion:
@@ -94,7 +94,7 @@ def genesis_cross_fields(genesis):
         hora = extra.get('hora_entrada_patio') or ''
         if not hora and genesis.hora_entrada:
             hora = genesis.hora_entrada.strftime('%H:%M:%S')
-    return patio, hora or timezone.now().strftime('%H:%M')
+    return patio, hora   # sin inventar hora
 
 
 def refresh_pending_cross(bus_ids=None):

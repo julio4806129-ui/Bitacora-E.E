@@ -13,6 +13,11 @@ _scheduler = None
 
 
 def start():
+    # DESACTIVADO: ahora se usa solo Celery Beat (evitar doble polling)
+    logger.warning('APScheduler desactivado. Usando solo Celery Beat.')
+    return
+
+    # --- código original queda debajo, no se ejecuta ---
     global _scheduler
 
     if _scheduler and _scheduler.running:

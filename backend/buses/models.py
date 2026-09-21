@@ -189,7 +189,7 @@ class DatosGenesis(models.Model):
     bus_movil = models.IntegerField(db_index=True)
     origen = models.CharField(max_length=200)
     destino = models.CharField(max_length=200)
-    hora_entrada = models.DateTimeField()
+    hora_entrada = models.DateTimeField(null=True, blank=True)
     patio_ubicacion = models.CharField(max_length=100, blank=True)
     datos_extra = models.JSONField(default=dict, blank=True)
     sincronizado_en = models.DateTimeField(auto_now=True)

@@ -95,73 +95,178 @@ def _parse_json(text):
 
 
 def fetch_via_http(email, password):
+    """
+    Login HTTP robusto a BUSAE (Yii2) con:
+    - Aceptación de cookies
+    - CSRF fresco
+    - Sesión en caché Redis
+    - Validación real de sesión
+    """
     import requests
     from django.core.cache import cache
 
     session = requests.Session()
     session.headers.update({
         'User-Agent': USER_AGENT,
-        'Accept': 'application/json, text/javascript, */*; q=0.01',
-        'X-Requested-With': 'XMLHttpRequest',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+        'Connection': 'keep-alive',
     })
-    cookie_key = 'busae:auth:cookies'
 
-    def request_payload(csrf):
+    cookie_key = 'busae:auth:cookies'
+    base = 'https://login.busae.com'
+    login_get = login_page_url() or f'{base}/site/login'
+    login_post = f'{base}/user-management/auth/login'
+    map_url = map_page_url()
+    data_endpoint = data_url()
+
+    def _request_payload(csrf_token):
         headers = {
-            'Referer': map_page_url(),
+            'Referer': map_url,
+            'X-Requested-With': 'XMLHttpRequest',
+            'Accept': 'application/json, text/javascript, */*; q=0.01',
             'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
         }
+        # Preferir POST (como hace el mapa real)
         res = session.post(
-            data_url(),
-            data={'refreshnocache': '1', '_csrf': csrf or ''},
+            data_endpoint,
+            data={'refreshnocache': '1', '_csrf': csrf_token or ''},
             headers=headers,
-            timeout=20,
+            timeout=25,
             allow_redirects=True,
         )
         if res.status_code == 200 and not _is_login_url(res.url):
             payload = _parse_json(res.text)
             if payload is not None:
                 return payload
-        res = session.get(data_url(), headers={'Referer': map_page_url()}, timeout=20)
+
+        # Fallback GET
+        res = session.get(
+            data_endpoint,
+            headers={'Referer': map_url, 'X-Requested-With': 'XMLHttpRequest'},
+            timeout=25,
+            allow_redirects=True,
+        )
         if res.status_code == 200 and not _is_login_url(res.url):
             return _parse_json(res.text)
         return None
 
+    def _session_looks_valid():
+        """Comprueba si la sesión actual ya está autenticada."""
+        try:
+            r = session.get(map_url, timeout=15, allow_redirects=True)
+            if r.status_code == 200 and not _is_login_url(r.url):
+                return True, _extract_csrf(r.text) or session.cookies.get('_csrf', '')
+        except Exception:
+            pass
+        return False, ''
+
+    # ── 1) Intentar reutilizar cookies en caché ──────────────────────────────
     cached = cache.get(cookie_key)
     if cached:
         session.cookies.update(cached)
-        csrf = session.cookies.get('_csrf') or ''
-        payload = request_payload(csrf)
-        if payload is not None:
-            logger.info('BUSAE — datos vía HTTP con sesión en caché')
-            return payload
+        ok, csrf = _session_looks_valid()
+        if ok:
+            payload = _request_payload(csrf)
+            if payload is not None:
+                logger.info('BUSAE — datos vía HTTP con sesión en caché')
+                return payload
+        # Caché inválida
+        cache.delete(cookie_key)
+        session.cookies.clear()
 
-    login_page = session.get(login_page_url(), timeout=20)
+    # ── 2) Cargar página de login y obtener CSRF ─────────────────────────────
+    try:
+        login_page = session.get(login_get, timeout=20, allow_redirects=True)
+    except Exception as e:
+        logger.warning('BUSAE HTTP — no se pudo cargar página de login: %s', e)
+        return None
+
     csrf = _extract_csrf(login_page.text) or session.cookies.get('_csrf') or ''
-    login_res = session.post(
-        DEFAULT_LOGIN_POST,
-        data={
-            '_csrf': csrf,
-            'LoginForm[username]': email,
-            'LoginForm[password]': password,
-            'LoginForm[rememberMe]': '1',
-        },
-        timeout=25,
-        allow_redirects=True,
-        headers={'Referer': login_page_url()},
-    )
-    if _is_login_url(login_res.url):
+    if not csrf:
+        # Fallback: meta csrf-token
+        match = re.search(r'name="csrf-token"\s+content="([^"]+)"', login_page.text or '')
+        if match:
+            csrf = match.group(1)
+
+    # ── 3) Aceptar cookies (banner) si existe endpoint simple ────────────────
+    # Yii / Busae suele guardar preferencia en cookie; intentamos setear una básica
+    session.cookies.set('cookie_consent', 'accepted', domain='login.busae.com')
+    session.cookies.set('cookieConsent', 'true', domain='login.busae.com')
+
+    # ── 4) POST de login ─────────────────────────────────────────────────────
+    login_data = {
+        '_csrf': csrf,
+        'LoginForm[username]': email,
+        'LoginForm[password]': password,
+        'LoginForm[rememberMe]': '1',
+    }
+    headers_login = {
+        'Referer': login_get,
+        'Origin': base,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    }
+
+    try:
+        login_res = session.post(
+            login_post,
+            data=login_data,
+            headers=headers_login,
+            timeout=30,
+            allow_redirects=True,
+        )
+    except Exception as e:
+        logger.warning('BUSAE HTTP — error en POST login: %s', e)
+        return None
+
+    final_url = (login_res.url or '').lower()
+    if _is_login_url(final_url):
+        # A veces el form action relativo redirige distinto; reintentar con URL de la página
+        form_action = None
+        m = re.search(r'<form[^>]+id="login-page"[^>]+action="([^"]+)"', login_page.text or '')
+        if m:
+            form_action = m.group(1)
+            if form_action.startswith('/'):
+                form_action = base + form_action
+        if form_action and form_action != login_post:
+            try:
+                login_res = session.post(
+                    form_action,
+                    data=login_data,
+                    headers=headers_login,
+                    timeout=30,
+                    allow_redirects=True,
+                )
+                final_url = (login_res.url or '').lower()
+            except Exception:
+                pass
+
+    if _is_login_url(final_url):
         logger.error('Login BUSAE HTTP fallido — sigue en página de login')
         return None
 
-    map_res = session.get(map_page_url(), timeout=20)
-    csrf = _extract_csrf(map_res.text) or session.cookies.get('_csrf') or csrf
-    cache.set(cookie_key, session.cookies.get_dict(), timeout=3600)
-    payload = request_payload(csrf)
-    if payload is not None:
-        logger.info('BUSAE — login HTTP OK y datos descargados')
-    return payload
+    # ── 5) Entrar al mapa y pedir datos ──────────────────────────────────────
+    try:
+        map_res = session.get(map_url, timeout=20, allow_redirects=True)
+        if _is_login_url(map_res.url):
+            logger.error('Login BUSAE HTTP fallido — redirigido al login al abrir mapa')
+            return None
+        csrf = _extract_csrf(map_res.text) or session.cookies.get('_csrf') or csrf
+    except Exception as e:
+        logger.warning('BUSAE HTTP — error al abrir mapa: %s', e)
+        return None
 
+    # Guardar sesión válida (1 hora)
+    cache.set(cookie_key, session.cookies.get_dict(), timeout=3600)
+
+    payload = _request_payload(csrf)
+    if payload is not None:
+        logger.info('BUSAE — login HTTP OK y datos descargados (%s items aprox)', 
+                    len(payload) if isinstance(payload, (list, dict)) else '?')
+    else:
+        logger.warning('BUSAE HTTP — login OK pero no se pudo parsear payload GPS')
+    return payload
 
 def fetch_via_playwright(email, password):
     from playwright.sync_api import sync_playwright

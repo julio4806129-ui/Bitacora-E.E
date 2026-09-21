@@ -165,38 +165,53 @@ class BusaeService:
                     }
                 )
 
-                if str(b.estado_gps).upper() in ('OFF', 'OFFLINE', 'NO RECORDS'):
+                if str(b.estado_gps).upper() in ('OFF', 'OFFLINE', 'NO RECORDS', 'STOPPED'):
+                    # Nota: ajusta la lista según qué estados deban generar reporte
                     genesis = latest_genesis(b.numero)
                     patio_entrada, hora_entrada = genesis_cross_fields(genesis)
                     diagnostico = (
                         f"Sin transmisión GPS en BUSAE ({b.estado_gps}). "
                         f"Última: {b.ultima_transmision or 'Desconocida'}"
                     )
+                    report_id = f"REP-{today_str}-{b.numero}"
+
                     rep_existente = ReportePendiente.objects.filter(
                         bus_movil=b.numero,
                         fecha_reporte=today
                     ).first()
 
                     if not rep_existente:
-                        ReportePendiente.objects.create(
-                            report_id=f"REP-{today_str}-{b.numero}",
-                            bus_movil=b.numero,
-                            estado_gps='OFF',
-                            patio=patio_entrada,
-                            fecha_reporte=today,
-                            hora_reporte=hora_entrada,
-                            diagnostico=diagnostico,
-                            estado='PENDIENTE'
-                        )
+                        # Evitar choque por report_id único
+                        rep_por_id = ReportePendiente.objects.filter(report_id=report_id).first()
+                        if rep_por_id:
+                            if rep_por_id.estado == 'PENDIENTE':
+                                rep_por_id.patio = patio_entrada or rep_por_id.patio
+                                rep_por_id.hora_reporte = hora_entrada or rep_por_id.hora_reporte
+                                rep_por_id.estado_gps = b.estado_gps
+                                rep_por_id.diagnostico = diagnostico
+                                rep_por_id.save(update_fields=[
+                                    'patio', 'hora_reporte', 'estado_gps', 'diagnostico'
+                                ])
+                            # si ya está ATENDIDO, no recrear
+                        else:
+                            ReportePendiente.objects.create(
+                                report_id=report_id,
+                                bus_movil=b.numero,
+                                estado_gps=str(b.estado_gps).upper()[:50] or 'OFF',
+                                patio=patio_entrada or '',
+                                fecha_reporte=today,
+                                hora_reporte=hora_entrada or '',
+                                diagnostico=diagnostico,
+                                estado='PENDIENTE'
+                            )
                     elif rep_existente.estado == 'PENDIENTE':
-                        rep_existente.patio = patio_entrada
-                        rep_existente.hora_reporte = hora_entrada
-                        rep_existente.estado_gps = b.estado_gps
+                        rep_existente.patio = patio_entrada or rep_existente.patio
+                        rep_existente.hora_reporte = hora_entrada or rep_existente.hora_reporte
+                        rep_existente.estado_gps = str(b.estado_gps).upper()[:50] or rep_existente.estado_gps
                         rep_existente.diagnostico = diagnostico
                         rep_existente.save(update_fields=[
                             'patio', 'hora_reporte', 'estado_gps', 'diagnostico'
                         ])
-                saved_count += 1
 
         refresh_pending_cross()
 

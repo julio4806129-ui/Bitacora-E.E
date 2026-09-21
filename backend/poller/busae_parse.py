@@ -1,10 +1,9 @@
 """Normaliza payloads BUSAE v1 (lista) y v2 (dict `buses`)."""
 from buses.bus_number import extract_bus_number, parse_bus_number
 
-GPS_OFF = frozenset({'off', 'offline', 'no records', 'false', '0', 'none', 'null', '-'})
-GPS_ON = frozenset({'on', 'online', 'active', 'true', '1', 'gps'})
-GPS_STOPPED = frozenset({'stopped', 'idle', 'parked'})
-
+GPS_OFF = frozenset({'off', 'offline', 'no records', 'false', '0', 'none', 'null', '-', 'sin señal'})
+GPS_ON = frozenset({'on', 'online', 'active', 'true', '1', 'gps', 'moving'})
+GPS_STOPPED = frozenset({'stopped', 'idle', 'parked', 'detenido'})
 
 def coerce_bus_items(payload):
     """Convierte la respuesta HTTP/JSON en una lista de dicts por bus."""
@@ -57,26 +56,48 @@ def _first_str(*values):
 
 
 def normalize_estado(raw):
+    """
+    Preserva estados reales de BUSAE:
+    Active | Stopped | Offline | No records
+    (compatibilidad: ON/OFF se mapean a Active/Offline)
+    """
     if not isinstance(raw, dict):
-        return 'OFF'
+        return 'Offline'
 
+    # 1) Campo de estado explícito (prioridad)
+    st = str(
+        raw.get('st')
+        or raw.get('estado')
+        or raw.get('status')
+        or raw.get('gps_status')
+        or raw.get('device_status')
+        or ''
+    ).strip()
+    key = st.lower()
+
+    if key in GPS_STOPPED or key in ('stopped', 'idle', 'parked', 'detenido'):
+        return 'Stopped'
+    if key in ('active', 'moving', 'en movimiento', 'en_movimiento'):
+        return 'Active'
+    if key in ('no records', 'norecords', 'no_records', 'sin registros'):
+        return 'No records'
+    if key in ('offline', 'off', 'sin señal', 'sin senal', 'sin transmision', 'sin transmisión'):
+        return 'Offline'
+    if key in ('on', 'online', 'true', '1', 'gps'):
+        return 'Active'
+    if key:
+        # Estado desconocido pero presente: devolver capitalizado
+        return st[:1].upper() + st[1:] if len(st) > 1 else st.upper()
+
+    # 2) has_gps / device_source como respaldo
     if 'has_gps' in raw:
-        return 'ON' if _truthy(raw.get('has_gps')) else 'OFF'
+        return 'Active' if _truthy(raw.get('has_gps')) else 'Offline'
 
     source = str(raw.get('device_source') or raw.get('source_location') or '').strip().lower()
     if source == 'gps':
-        return 'ON'
+        return 'Active'
 
-    st = str(raw.get('st') or raw.get('estado') or raw.get('status') or '').strip()
-    key = st.lower()
-    if key in GPS_STOPPED:
-        return 'Stopped'
-    if key in GPS_ON:
-        return 'ON'
-    if key in GPS_OFF or not key:
-        return 'OFF'
-    return st or 'OFF'
-
+    return 'Offline'
 
 def to_schema_dict(raw):
     if not isinstance(raw, dict):

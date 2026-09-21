@@ -144,29 +144,38 @@ class GenesisService:
         return str(val).strip()
 
     def _calcular_patio_ubicacion(self, item: Dict[str, Any]) -> str:
-        estado = self._clean_str(item.get('Estado'))
+        # Campo principal de Genesis real
+        patio_ubica = self._clean_str(
+            item.get('PatioUbica') or item.get('PatioUbicacion') or item.get('patio_ubicacion')
+        )
+        if patio_ubica:
+            return patio_ubica
+
+        estado = self._clean_str(item.get('Estado')).lower()
         origen = self._clean_str(item.get('Origen'))
         destino = self._clean_str(item.get('Destino'))
 
-        if not estado:
-            return ''
-        if estado.lower() == 'inoperativo':
-            return origen
-        if not destino:
-            return origen
-        return destino
+        if estado == 'inoperativo':
+            return origen or ''
+
+        if origen.lower() == 'en via' or not destino:
+            return origen or ''
+
+        return destino or origen or ''
 
     def _calcular_hora_entrada(self, item: Dict[str, Any]) -> str:
-        estado = self._clean_str(item.get('Estado'))
-        origen = self._clean_str(item.get('Origen'))
-        horafin = self._clean_str(item.get('Horafin'))
+        estado = self._clean_str(item.get('Estado')).lower()
+        origen = self._clean_str(item.get('Origen')).lower()
+        horafin = self._clean_str(item.get('Horafin') or item.get('Hora_Entrada'))
 
-        if not estado or estado.lower() == 'inoperativo':
+        if estado == 'inoperativo':
             return ''
+
         if not horafin:
-            if origen.lower() == 'en via':
+            if origen == 'en via':
                 return 'Relevo'
             return ''
+
         return horafin
 
     def save_to_database(self, items: List[Dict[str, Any]], incremental: bool = True) -> int:
@@ -182,10 +191,11 @@ class GenesisService:
                 origen = self._clean_str(item.get('Origen'))
                 destino = self._clean_str(item.get('Destino'))
                 estado = self._clean_str(item.get('Estado'))
-                patio = self._calcular_patio_ubicacion(item)
+                patio = self._calcular_patio_ubicacion(item)   # usa PatioUbica
                 hora_entrada_calc = self._calcular_hora_entrada(item)
 
-                hora_entrada_dt = now
+                # NO inventar hora si Genesis no trae Horafin
+                hora_entrada_dt = None
                 h_str = self._clean_str(item.get('Hora_Entrada') or item.get('Horafin'))
                 if h_str:
                     try:
@@ -203,7 +213,7 @@ class GenesisService:
                             except (ValueError, TypeError):
                                 continue
                     except Exception:
-                        hora_entrada_dt = now
+                        hora_entrada_dt = None
 
                 # Sincronización incremental: verificar si los datos relevantes cambiaron
                 if incremental:
@@ -222,6 +232,7 @@ class GenesisService:
                     'opreal': self._clean_str(item.get('Opreal')),
                     'horafin': self._clean_str(item.get('Horafin')),
                     'hora_entrada_patio': hora_entrada_calc,
+                    'patio_ubica_raw': self._clean_str(item.get('PatioUbica')),
                     'linea': self._clean_str(item.get('Linea')),
                     'bloque': self._clean_str(item.get('Bloque')),
                     'raw': item,
@@ -232,8 +243,8 @@ class GenesisService:
                     defaults={
                         'origen': origen,
                         'destino': destino,
-                        'hora_entrada': hora_entrada_dt,
-                        'patio_ubicacion': patio or origen,
+                        'hora_entrada': hora_entrada_dt,   # puede ser None
+                        'patio_ubicacion': patio,           # desde PatioUbica
                         'datos_extra': extra_data,
                     }
                 )

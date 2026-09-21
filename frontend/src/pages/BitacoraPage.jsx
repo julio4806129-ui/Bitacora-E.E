@@ -644,12 +644,29 @@ export default function BitacoraPage() {
     }
   }, [searchParams]);
 
-  const qp = { search, patio, estado_gps: estadoGps, estado_genesis: estadoGenesis, page, page_size: pageSize, ordering: sortDir === "desc" ? `-${sortKey}` : sortKey };
-  const { data, isLoading, isFetching, isError, refetch } = useQuery({
+    const qp = {
+    search,
+    patio,
+    estado_gps: estadoGps,
+    estado_genesis: estadoGenesis,
+    page,
+    page_size: pageSize,
+    ordering: sortDir === "desc" ? `-${sortKey}` : sortKey,
+  };
+
+  const {
+    data,
+    isLoading,
+    isFetching,
+    isError,        // ← tiene que estar
+    refetch,
+    dataUpdatedAt,
+  } = useQuery({
     queryKey: ["bitacora-tabla", qp],
     queryFn: () => apiClient.get("/bitacora/tabla/", { params: qp }),
-    staleTime: 30000, 
-    refetchInterval: 60000,
+    staleTime: 20_000,
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
   });
 
   const rows = data?.results || [];

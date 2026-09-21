@@ -643,8 +643,9 @@ class RegistroBitacoraViewSet(viewsets.ModelViewSet):
             hora_entrada = ''
             if genesis and genesis.hora_entrada:
                 hora_entrada = genesis.hora_entrada.strftime('%H:%M:%S')
-            else:
-                hora_entrada = r.hora_reporte or '08:00'
+            elif r.hora_reporte:
+                hora_entrada = r.hora_reporte
+            # si no hay, queda ''
 
             estado_bus = 'EN PATIO'
             if genesis and genesis.datos_extra:
@@ -1501,25 +1502,40 @@ class DescargarExportacionView(APIView):
 class PollerSyncView(APIView):
     """
     Trigger manual de extracción de datos de BUSAE y/o Genesis.
+    Usa los servicios robustos (circuit breaker + reintentos).
     """
     permission_classes = [EsAdmin]
 
     def post(self, request):
-        servicio = request.data.get('servicio', 'ambos')
-        try:
-            from poller import scheduler, busae_service, genesis_service
-            if servicio == 'genesis':
-                res = genesis_service.run()
-                return Response({'status': 'ok', 'servicio': 'genesis', 'resultado': res})
-            elif servicio == 'busae':
-                res = busae_service.run()
-                return Response({'status': 'ok', 'servicio': 'busae', 'resultado': res})
-            else:
-                res = scheduler.run_now()
-                return Response({'status': 'ok', 'servicio': 'ambos', 'resultado': res})
-        except Exception as e:
-            return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        servicio = str(request.data.get('servicio', 'ambos')).lower().strip()
+        resultados = {}
 
+        try:
+            if servicio in ('genesis', 'ambos'):
+                from buses.services.genesis_service import genesis_service
+                resultados['genesis'] = genesis_service.sync(force_refresh=True)
+
+            if servicio in ('busae', 'ambos'):
+                from buses.services.busae_service import busae_service
+                resultados['busae'] = busae_service.sync()
+
+            if not resultados:
+                return Response(
+                    {'status': 'error', 'message': 'Servicio inválido. Use: busae, genesis o ambos'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            return Response({
+                'status': 'ok',
+                'servicio': servicio,
+                'resultado': resultados,
+                'timestamp': timezone.now().isoformat()
+            })
+        except Exception as e:
+            return Response(
+                {'status': 'error', 'message': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 # =============================================================
 # BITÁCORA - VISTA CONSOLIDADA IDENTICA A LA CAPTURA

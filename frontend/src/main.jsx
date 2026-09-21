@@ -9,8 +9,11 @@ import './index.css';
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      refetchOnWindowFocus: false,
+      refetchOnWindowFocus: true,   // al volver a la pestaña, actualiza
+      refetchOnReconnect: true,     // al recuperar internet
       retry: 1,
+      staleTime: 15_000,            // 15 s: datos "frescos" por defecto
+      gcTime: 5 * 60_000,           // 5 min en caché
     },
   },
 });
