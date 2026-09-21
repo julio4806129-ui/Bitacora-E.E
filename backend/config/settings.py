@@ -208,8 +208,8 @@ BUSAE_DATA_URL = os.environ.get(
 BUSAE_EMAIL = os.environ.get('BUSAE_EMAIL', '')
 BUSAE_PASSWORD = os.environ.get('BUSAE_PASSWORD', '')
 GENESIS_URL = os.environ.get('GENESIS_URL', 'http://genesis.mibus.com/tic/oi/gateway.php')
-GENESIS_USER = os.environ.get('GENESIS_USER', '10844')
-GENESIS_PASSWORD = os.environ.get('GENESIS_PASSWORD', 'Mibus2017')
+GENESIS_USER = os.environ.get('GENESIS_USER', '')
+GENESIS_PASSWORD = os.environ.get('GENESIS_PASSWORD', '')
 POLL_INTERVAL_MINUTES = int(os.environ.get('POLL_INTERVAL_MINUTES', '5') or 5)
 ENABLE_INLINE_POLLER = os.environ.get('ENABLE_INLINE_POLLER', 'true').lower() in ('true', '1', 'yes')
 
