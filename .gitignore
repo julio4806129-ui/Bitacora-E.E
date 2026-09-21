@@ -74,5 +74,5 @@ backend/media/tmp/
 backend/busae_login_*.html
 backend/busae_login_*.png
 
-# Archivos de configuración incorrectos
+# Archivos incorrectos
 backend/.gitignore.txt
