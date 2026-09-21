@@ -45,8 +45,8 @@ class GenesisService:
             logger.debug(f"Error consultando credenciales de Genesis en BD: {e}")
 
         if not user or not pwd:
-            user = getattr(settings, 'GENESIS_USER', '10844')
-            pwd = getattr(settings, 'GENESIS_PASSWORD', 'Mibus2017')
+            user = getattr(settings, 'GENESIS_USER', '')
+            pwd = getattr(settings, 'GENESIS_PASSWORD', '')
 
         return str(user).strip(), str(pwd).strip()
 

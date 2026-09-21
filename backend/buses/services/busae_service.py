@@ -115,6 +115,10 @@ class BusaeService:
             raise BusaeIntegrationError("Credenciales de BUSAE ausentes.")
 
         payload = fetch_payload()
+        if payload is None:
+            raise BusaeIntegrationError(
+                'No se pudo obtener datos de BUSAE. Verifique BUSAE_EMAIL/BUSAE_PASSWORD en backend/.env.'
+            )
         raw_items = coerce_bus_items(payload)
         if not raw_items:
             raise BusaeIntegrationError("La respuesta de BUSAE no contiene datos.")
@@ -162,8 +166,10 @@ class BusaeService:
                         'manos_libres': b.manos_libres,
                         'telefono': b.telefono,
                         'ultima_transmision': parse_busae_datetime(b.ultima_transmision),
+                        'odometro': getattr(b, 'odometro', None) if hasattr(b, 'odometro') else None,
                     }
                 )
+                saved_count += 1
 
                 if str(b.estado_gps).upper() in ('OFF', 'OFFLINE', 'NO RECORDS', 'STOPPED'):
                     # Nota: ajusta la lista según qué estados deban generar reporte

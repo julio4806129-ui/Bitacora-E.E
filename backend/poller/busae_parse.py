@@ -1,12 +1,17 @@
-"""Normaliza payloads BUSAE v1 (lista) y v2 (dict `buses`)."""
+"""Normaliza payloads BUSAE v2 (dict `buses`) al esquema interno."""
 from buses.bus_number import extract_bus_number, parse_bus_number
 
-GPS_OFF = frozenset({'off', 'offline', 'no records', 'false', '0', 'none', 'null', '-', 'sin señal'})
+GPS_OFF = frozenset({'off', 'offline', 'no records', 'false', '0', 'none', 'null', '-', 'sin señal', 'sin senal'})
 GPS_ON = frozenset({'on', 'online', 'active', 'true', '1', 'gps', 'moving'})
 GPS_STOPPED = frozenset({'stopped', 'idle', 'parked', 'detenido'})
 
+
 def coerce_bus_items(payload):
-    """Convierte la respuesta HTTP/JSON en una lista de dicts por bus."""
+    """Convierte la respuesta HTTP/JSON en una lista de dicts por bus.
+
+    Formato real BUSAE v2:
+    { "buses": { "451": { "bus_number": "0806", "status": "Stopped", ... }, ... } }
+    """
     if payload is None:
         return []
 
@@ -16,11 +21,11 @@ def coerce_bus_items(payload):
             return [v for v in buses.values() if isinstance(v, dict)]
         if isinstance(buses, list):
             return [v for v in buses if isinstance(v, dict)]
-        if any(k in payload for k in ('bus_number', 'bn', 'has_gps', 'st')):
+        if any(k in payload for k in ('bus_number', 'bn', 'has_gps', 'status', 'st')):
             return [payload]
         nested = [v for v in payload.values() if isinstance(v, dict)]
         if nested and any(
-            ('bus_number' in v or 'bn' in v or 'has_gps' in v or 'st' in v)
+            ('bus_number' in v or 'bn' in v or 'has_gps' in v or 'status' in v or 'st' in v)
             for v in nested
         ):
             return nested
@@ -57,18 +62,15 @@ def _first_str(*values):
 
 def normalize_estado(raw):
     """
-    Preserva estados reales de BUSAE:
-    Active | Stopped | Offline | No records
-    (compatibilidad: ON/OFF se mapean a Active/Offline)
+    Estados reales BUSAE: Active | Stopped | Offline | No records
     """
     if not isinstance(raw, dict):
         return 'Offline'
 
-    # 1) Campo de estado explícito (prioridad)
     st = str(
-        raw.get('st')
+        raw.get('status')
+        or raw.get('st')
         or raw.get('estado')
-        or raw.get('status')
         or raw.get('gps_status')
         or raw.get('device_status')
         or ''
@@ -86,12 +88,18 @@ def normalize_estado(raw):
     if key in ('on', 'online', 'true', '1', 'gps'):
         return 'Active'
     if key:
-        # Estado desconocido pero presente: devolver capitalizado
         return st[:1].upper() + st[1:] if len(st) > 1 else st.upper()
 
-    # 2) has_gps / device_source como respaldo
+    # Respaldo: has_gps / device_source
     if 'has_gps' in raw:
-        return 'Active' if _truthy(raw.get('has_gps')) else 'Offline'
+        if _truthy(raw.get('has_gps')):
+            # Si tiene GPS pero no status, inferir por velocidad
+            try:
+                spd = float(raw.get('speed') or 0)
+                return 'Active' if spd > 0 else 'Stopped'
+            except (TypeError, ValueError):
+                return 'Active'
+        return 'Offline'
 
     source = str(raw.get('device_source') or raw.get('source_location') or '').strip().lower()
     if source == 'gps':
@@ -99,11 +107,20 @@ def normalize_estado(raw):
 
     return 'Offline'
 
+
 def to_schema_dict(raw):
+    """
+    Mapea un item del JSON real de BUSAE al esquema interno.
+
+    Campos reales usados:
+      bus_number, plate_number, status, latitude, longitude, speed,
+      telephone, last_gps_signal, display_time, log_time, has_app, has_gps, odometer
+    """
     if not isinstance(raw, dict):
         return None
 
-    numero = extract_bus_number(raw) or parse_bus_number(raw.get('id'))
+    # bus_number "0806" -> 806
+    numero = extract_bus_number(raw) or parse_bus_number(raw.get('map_marker_title')) or parse_bus_number(raw.get('bus_id'))
     if not numero:
         return None
 
@@ -124,21 +141,38 @@ def to_schema_dict(raw):
 
     return {
         'numero': numero,
-        'placa': _first_str(raw.get('plt'), raw.get('placa'), raw.get('plate'), raw.get('bus_plate')),
+        # plate_number es el campo real (ej. MB0806)
+        'placa': _first_str(
+            raw.get('plate_number'),
+            raw.get('plt'),
+            raw.get('placa'),
+            raw.get('plate'),
+            raw.get('bus_plate'),
+        ),
         'estado_gps': normalize_estado(raw),
         'ultima_transmision': _first_str(
-            raw.get('last_gps_signel'),
             raw.get('last_gps_signal'),
+            raw.get('last_gps_signel'),  # typo legacy
             raw.get('display_time'),
             raw.get('log_time'),
             raw.get('l_g_s'),
             raw.get('ultima_transmision'),
         ),
-        'manos_libres': _truthy(raw.get('h_ti') if 'h_ti' in raw else raw.get('has_app')),
-        'telefono': _first_str(raw.get('tel'), raw.get('telefono'), raw.get('phone')),
+        'manos_libres': _truthy(raw.get('has_app') if 'has_app' in raw else raw.get('h_ti')),
+        # telephone es el campo real
+        'telefono': _first_str(
+            raw.get('telephone'),
+            raw.get('tel'),
+            raw.get('telefono'),
+            raw.get('phone'),
+        ),
         'latitud': lat or None,
         'longitud': lng or None,
         'velocidad': velocidad,
+        # extras utiles (opcionales, el schema Pydantic los ignora si no los declara)
+        'odometro': raw.get('odometer'),
+        'angle': raw.get('angle'),
+        'has_gps': raw.get('has_gps'),
     }
 
 
