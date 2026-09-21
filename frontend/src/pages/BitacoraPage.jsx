@@ -100,19 +100,25 @@ async function saveTableConfig(module, columnas) {
 }
 
 function AtencionModal({ bus, onClose }) {
-  const { user } = useAuth();
+  const { user, setShiftCounter, refreshCounter } = useAuth();
   const queryClient = useQueryClient();
   const [dynamicValues, setDynamicValues] = useState({});
-  const [respuestaTecnica, setRespuestaTecnica] = useState('');
-  const [observaciones, setObservaciones] = useState('');
+  const [respuestaTecnica, setRespuestaTecnica] = useState("");
+  const [observaciones, setObservaciones] = useState("");
+  const [tipoMant, setTipoMant] = useState("Revision por Bitacora");
 
   const saveMut = useMutation({
-    mutationFn: (payload) => apiClient.post("/registros-bitacora/", payload),
-    onSuccess: () => { 
-      queryClient.invalidateQueries({ queryKey: ["bitacora-tabla"] }); 
+    mutationFn: (payload) => apiClient.post("/registros-bitacora/atender/", payload),
+    onSuccess: (data) => {
+      if (data?.nuevo_contador != null && setShiftCounter) {
+        setShiftCounter(data.nuevo_contador);
+      } else if (refreshCounter) {
+        refreshCounter();
+      }
+      queryClient.invalidateQueries({ queryKey: ["bitacora-tabla"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-stats"] });
-      onClose(); 
-    }
+      onClose();
+    },
   });
 
   const handleSave = () => {
@@ -120,158 +126,159 @@ function AtencionModal({ bus, onClose }) {
     saveMut.mutate({
       bus_movil: bus.bus,
       patio: bus.patio_ubicacion || "CURUNDU",
-      tipo_mantenimiento: "Revision por Bitacora",
-      respuesta_tecnica: respuestaTecnica,
-      observaciones: observaciones,
-      datos_dinamicos: dynamicValues
+      tipo_mantenimiento: tipoMant,
+      respuesta_tecnica: respuestaTecnica.trim(),
+      observaciones: observaciones.trim(),
+      datos_dinamicos: dynamicValues,
+      source: "bitacora",
+      estado_gps: bus.estado_gps || "",
+      placa: bus.placa || "",
     });
   };
 
+  const gpsLabel = (bus.estado_gps || "").toString();
+  const gpsTone =
+    /active|ok|on/i.test(gpsLabel) ? "emerald" :
+    /stop|deten/i.test(gpsLabel) ? "amber" :
+    /off|sin|no record/i.test(gpsLabel) ? "rose" : "slate";
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fadeIn">
-      <div 
-        className="relative bg-[#0b1329] rounded-2xl shadow-2xl w-full max-w-2xl border border-slate-700/80 overflow-hidden ring-1 ring-white/10"
-        onClick={e => e.stopPropagation()}
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/75 backdrop-blur-sm animate-fadeIn">
+      <div
+        className="relative w-full sm:max-w-xl max-h-[92vh] flex flex-col rounded-t-2xl sm:rounded-2xl bg-[#0b1329] border border-slate-700/70 shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
       >
-        {/* Modal Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-[#070b14]/80">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-cyan-500/15 border border-cyan-500/30 text-cyan-400">
-              <Bus className="w-5 h-5" />
+        {/* Header compacto */}
+        <div className="shrink-0 px-5 py-4 border-b border-slate-800 bg-gradient-to-r from-[#070b14] to-[#0b1329]">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="h-11 w-11 rounded-xl bg-cyan-500/15 border border-cyan-500/30 flex items-center justify-center shrink-0">
+                <Bus className="w-5 h-5 text-cyan-400" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-base font-black text-white tracking-tight">
+                    Móvil {formatBusNumber(bus.bus)}
+                  </h2>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-slate-800/90 border border-slate-700 text-slate-300">
+                    {bus.placa || "Sin placa"}
+                  </span>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border bg-${gpsTone}-500/15 border-${gpsTone}-500/30 text-${gpsTone}-300`}>
+                    {gpsLabel || "GPS N/A"}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-0.5 truncate">
+                  <span className="text-cyan-300/90 font-medium">{bus.patio_ubicacion || "—"}</span>
+                  <span className="mx-1.5 text-slate-600">·</span>
+                  {user?.nombre || user?.username || "Técnico"}
+                </p>
+              </div>
             </div>
-            <div>
-              <h2 className="font-black text-white text-sm tracking-tight flex items-center gap-2">
-                <span>Atención Técnica · Móvil {formatBusNumber(bus.bus)}</span>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300">
-                  {bus.placa || 'Placa N/A'}
-                </span>
-              </h2>
-              <p className="text-[11px] text-slate-400 mt-0.5">
-                Patio: <span className="text-cyan-300 font-semibold">{bus.patio_ubicacion || 'CURUNDU'}</span> · Técnico: <span className="text-white font-medium">{user?.nombre || user?.username || 'Técnico'}</span>
-              </p>
-            </div>
+            <button onClick={onClose} className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition">
+              <X className="w-4 h-4" />
+            </button>
           </div>
-          <button onClick={onClose} className="p-1.5 hover:bg-slate-800 rounded-xl text-slate-400 hover:text-white transition-colors">
-            <X className="w-5 h-5" />
-          </button>
         </div>
 
-        {/* Form Body */}
-        <div className="p-6 max-h-[75vh] overflow-y-auto space-y-5">
-          {/* Fixed Header Fields */}
-          <div className="p-4 rounded-xl bg-[#070b14]/70 border border-slate-800/90 space-y-4">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2">
-              <Radio className="h-4 w-4 text-cyan-400" />
-              Cabecera de Atención (Campos Fijos)
-            </h3>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-300 mb-1">Bus Móvil *</label>
-                <input 
-                  type="number" 
-                  value={formatBusNumber(bus.bus)} 
-                  readOnly
-                  className="w-full border border-slate-800 rounded-xl px-3 py-2 text-xs bg-slate-900 text-white font-mono font-bold cursor-not-allowed" 
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-300 mb-1">Patio *</label>
-                <input 
-                  type="text" 
-                  value={bus.patio_ubicacion || "CURUNDU"} 
-                  readOnly
-                  className="w-full border border-slate-800 rounded-xl px-3 py-2 text-xs bg-slate-900 text-white cursor-not-allowed" 
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-300 mb-1">Técnico de Turno *</label>
-                <input 
-                  type="text" 
-                  value={user?.nombre || user?.username || 'Técnico'} 
-                  readOnly
-                  className="w-full border border-slate-800 rounded-xl px-3 py-2 text-xs bg-slate-900 text-white cursor-not-allowed" 
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-300 mb-1">Tipo de Mantenimiento *</label>
-                <select 
-                  value="Revision por Bitacora" 
-                  disabled
-                  className="w-full border border-slate-800 rounded-xl px-3 py-2 text-xs bg-slate-900 text-white cursor-not-allowed" 
+        {/* Body scrollable */}
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+          {/* Tipo de atención */}
+          <div>
+            <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1.5 block">Tipo de atención</label>
+            <div className="flex flex-wrap gap-2">
+              {["Revision por Bitacora", "Correctivo", "Preventivo", "Diagnostico"].map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setTipoMant(t)}
+                  className={clsx(
+                    "px-3 py-1.5 rounded-full text-[11px] font-semibold border transition",
+                    tipoMant === t
+                      ? "bg-cyan-500/20 border-cyan-500/50 text-cyan-200"
+                      : "bg-slate-900/50 border-slate-700 text-slate-400 hover:border-slate-600"
+                  )}
                 >
-                  <option value="Revision por Bitacora">Revisión por Bitácora</option>
-                </select>
-              </div>
+                  {t.replace("Revision por Bitacora", "Revisión")}
+                </button>
+              ))}
             </div>
           </div>
 
-          {/* Dynamic Form Engine - 100% Configurable from Schema Editor */}
-          <div className="p-4 rounded-xl bg-[#070b14]/70 border border-slate-800/90 space-y-3">
-            <div className="flex items-center gap-2">
-              <Sliders className="h-4 w-4 text-cyan-400" />
-              <h3 className="text-xs font-bold text-white uppercase tracking-wider">
-                Inspección Dinámica (Configurada en Schema Editor)
+          {/* Inspección dinámica */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                Checklist de inspección
               </h3>
-              <span className="text-[10px] font-mono text-cyan-400/80 px-2 py-0.5 rounded bg-cyan-500/10 border border-cyan-500/20">
-                Módulo: bitacora
-              </span>
+              <span className="text-[9px] font-mono text-slate-600">Schema · bitacora</span>
             </div>
-            <DynamicFormRenderer
-              moduleName="bitacora"
-              initialData={dynamicValues}
-              onSubmit={(vals) => setDynamicValues(vals)}
-              isReadOnly={false}
-            />
+            <div className="rounded-xl border border-slate-800/80 bg-[#070b14]/50 p-3.5">
+              <DynamicFormRenderer
+                moduleName="bitacora"
+                initialData={dynamicValues}
+                onChange={setDynamicValues}
+                hideSubmit
+                isReadOnly={false}
+              />
+            </div>
+            <p className="text-[10px] text-slate-600 mt-1.5">
+              Los campos se configuran en Schema Editor (tipos, obligatorios, opciones).
+            </p>
           </div>
 
-          {/* Closing Fields */}
-          <div className="p-4 rounded-xl bg-[#070b14]/70 border border-slate-800/90 space-y-4 border-l-4 border-emerald-500">
-            <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-2">
-              <CheckCircle2 className="h-4 w-4" />
-              Cierre de Atención
-            </h3>
-            <div>
-              <label className="block text-[11px] font-semibold text-slate-300 mb-1.5">Respuesta Técnica / Solución *</label>
-              <textarea 
-                rows={3} 
-                value={respuestaTecnica} 
-                onChange={e=>setRespuestaTecnica(e.target.value)}
-                placeholder="Diagnóstico, cableado reconectado, reinicio de módem, piezas sustituidas..."
-                className="w-full border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs bg-[#070b14] text-white focus:outline-none focus:border-emerald-500 placeholder-slate-500 resize-none" 
-                required
+          {/* Cierre */}
+          <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3.5 space-y-3">
+            <label className="block">
+              <span className="text-[11px] font-semibold text-slate-200">
+                Respuesta técnica <span className="text-rose-400">*</span>
+              </span>
+              <textarea
+                rows={3}
+                value={respuestaTecnica}
+                onChange={(e) => setRespuestaTecnica(e.target.value)}
+                placeholder="Qué se revisó, qué se corrigió, resultado..."
+                className="mt-1.5 w-full rounded-lg bg-[#0a1020] border border-slate-700/80 px-3 py-2 text-xs text-white placeholder-slate-600 outline-none focus:border-emerald-500/50 resize-none"
               />
-            </div>
-            <div>
-              <label className="block text-[11px] font-semibold text-slate-300 mb-1.5">Observaciones</label>
-              <textarea 
-                rows={2} 
-                value={observaciones} 
-                onChange={e=>setObservaciones(e.target.value)}
-                placeholder="Recomendaciones, piezas a sustituir en próximo mantenimiento..."
-                className="w-full border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs bg-[#070b14] text-white focus:outline-none focus:border-cyan-500 placeholder-slate-500 resize-none" 
+            </label>
+            <label className="block">
+              <span className="text-[11px] font-semibold text-slate-400">Observaciones</span>
+              <textarea
+                rows={2}
+                value={observaciones}
+                onChange={(e) => setObservaciones(e.target.value)}
+                placeholder="Opcional: recomendaciones, repuestos..."
+                className="mt-1.5 w-full rounded-lg bg-[#0a1020] border border-slate-700/80 px-3 py-2 text-xs text-white placeholder-slate-600 outline-none focus:border-cyan-500/40 resize-none"
               />
-            </div>
-
+            </label>
             {saveMut.isError && (
-              <div className="flex items-center gap-2 p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs text-rose-400">
-                <AlertCircle className="w-4 h-4" /> Error al registrar la atención.
+              <div className="flex items-center gap-2 text-xs text-rose-400">
+                <AlertCircle className="w-3.5 h-3.5" />
+                {saveMut.error?.userMessage || saveMut.error?.response?.data?.message || "Error al registrar"}
               </div>
             )}
           </div>
         </div>
 
-        {/* Modal Footer */}
-        <div className="flex items-center justify-between px-6 py-4 border-t border-slate-800 bg-[#070b14]/80">
-          <button onClick={onClose} className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white border border-slate-800 rounded-xl hover:bg-slate-800 transition-colors">
+        {/* Footer único CTA */}
+        <div className="shrink-0 flex items-center gap-3 px-5 py-4 border-t border-slate-800 bg-[#070b14]">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2.5 text-xs font-semibold text-slate-400 hover:text-white rounded-xl border border-slate-800 hover:bg-slate-800/80 transition"
+          >
             Cancelar
           </button>
-          <button 
-            onClick={handleSave} 
-            disabled={saveMut.isPending || !respuestaTecnica.trim()} 
-            className="flex items-center gap-1.5 px-5 py-2 text-xs font-bold bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white rounded-xl shadow-lg shadow-emerald-500/25 disabled:opacity-60 transition-all"
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saveMut.isPending || !respuestaTecnica.trim()}
+            className="flex-1 flex items-center justify-center gap-2 py-2.5 text-xs font-bold rounded-xl text-white bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 shadow-lg shadow-emerald-500/20 disabled:opacity-50 transition"
           >
-            {saveMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} 
-            Cerrar & Guardar Atención
+            {saveMut.isPending ? (
+              <><Loader2 className="w-4 h-4 animate-spin" /> Registrando...</>
+            ) : (
+              <><CheckCircle2 className="w-4 h-4" /> Registrar atención</>
+            )}
           </button>
         </div>
       </div>
