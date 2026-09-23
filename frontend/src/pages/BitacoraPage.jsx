@@ -36,6 +36,7 @@ import { useAuth } from "../hooks/useAuth";
 import DynamicFormRenderer from "../components/DynamicFormRenderer";
 import { formatBusNumber, nextSort } from "../utils/busNumber";
 import SortableTh from "../components/SortableTh";
+import clsx from "clsx";
 
 const PATIOS = ["LOS PUEBLOS", "RELEVO CA", "CURUNDU", "OJO DE AGUA", "LA DONA", "CHORRILLO", "LA CABIMA"];
 const PAGE_SIZES = [20, 50, 100];
@@ -623,6 +624,7 @@ export default function BitacoraPage() {
   const [patio, setPatio] = useState("");
   const [estadoGps, setEstadoGps] = useState("");
   const [estadoGenesis, setEstadoGenesis] = useState("");
+  const [modo, setModo] = useState("reactivo"); // reactivo | preventivo | todos
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [atencionBus, setAtencionBus] = useState(null);
@@ -676,7 +678,21 @@ export default function BitacoraPage() {
     refetchIntervalInBackground: false,
   });
 
-  const rows = data?.results || [];
+  const rowsRaw = data?.results || [];
+  const rows = (() => {
+    if (modo === "todos") return rowsRaw;
+    if (modo === "reactivo") {
+      return rowsRaw.filter(r => {
+        const g = String(r.estado_gps || "").toLowerCase();
+        return g.includes("offline") || g.includes("no record") || g === "off";
+      });
+    }
+    // preventivo: GPS operativo (Active/Stopped) para revisión programada
+    return rowsRaw.filter(r => {
+      const g = String(r.estado_gps || "").toLowerCase();
+      return g.includes("active") || g.includes("stopped") || g.includes("deten");
+    });
+  })();
   const total = data?.count || 0;
   const totalPages = data?.total_pages || 1;
   const clearFilters = () => {
@@ -781,6 +797,35 @@ export default function BitacoraPage() {
             </button>
           </div>
         </div>
+      </div>
+
+      {/* Modo Reactivo / Preventivo */}
+      <div className="bg-[#0b1329]/90 border border-slate-800 rounded-2xl px-4 py-3 shadow-xl ring-1 ring-white/5 shrink-0 flex flex-wrap items-center gap-2">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mr-1">Modo</span>
+        {[
+          { id: "reactivo", label: "Reactivo", hint: "Solo sin GPS / críticos" },
+          { id: "preventivo", label: "Preventivo", hint: "Flota operativa a revisar" },
+          { id: "todos", label: "Todos", hint: "Sin filtro de modo" },
+        ].map(m => (
+          <button
+            key={m.id}
+            type="button"
+            title={m.hint}
+            onClick={() => { setModo(m.id); setPage(1); }}
+            className={
+              modo === m.id
+                ? "px-3.5 py-1.5 rounded-xl text-[11px] font-bold border bg-cyan-500/20 border-cyan-500/50 text-cyan-200"
+                : "px-3.5 py-1.5 rounded-xl text-[11px] font-semibold border border-slate-800 text-slate-400 hover:border-slate-600"
+            }
+          >
+            {m.label}
+          </button>
+        ))}
+        <span className="text-[10px] text-slate-600 font-mono ml-2 hidden sm:inline">
+          {modo === "reactivo" && "Correctivos · Offline / No records"}
+          {modo === "preventivo" && "Proactivo · Active / Stopped"}
+          {modo === "todos" && "Vista completa de flota"}
+        </span>
       </div>
 
       {/* Filter Controls Bar */}
