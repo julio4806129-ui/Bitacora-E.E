@@ -252,11 +252,6 @@ class TareaExportacion(models.Model):
 
 
 class InventarioFlota(models.Model):
-    """
-    Catálogo maestro de la Flota.
-    Controla alta / baja / reactivación de unidades.
-    Solo los buses con estado_operativo = ACTIVO generan reportes pendientes.
-    """
     ESTADOS_OPERATIVOS = [
         ('ACTIVO', 'Activo'),
         ('BAJA', 'Fuera de servicio (Baja)'),
@@ -268,10 +263,7 @@ class InventarioFlota(models.Model):
     tipo_flota = models.CharField(max_length=50, default='Torino')
     patio = models.CharField(max_length=100, blank=True, default='LOS PUEBLOS')
 
-    # Campo legacy (se mantiene por compatibilidad)
-    estado = models.CharField(max_length=50, default='OPERATIVO')
-
-    # ── Nuevos campos de control de alta/baja ──────────────────────────────
+    # Campo principal de ciclo de vida (el que usa el poller)
     estado_operativo = models.CharField(
         max_length=20,
         choices=ESTADOS_OPERATIVOS,
@@ -279,6 +271,10 @@ class InventarioFlota(models.Model):
         db_index=True,
         help_text='ACTIVO = genera reportes | BAJA = no genera reportes'
     )
+
+    # Campo legacy (compatibilidad temporal)
+    estado = models.CharField(max_length=50, default='OPERATIVO')
+
     motivo_baja = models.TextField(blank=True, default='')
     fecha_baja = models.DateTimeField(null=True, blank=True)
     fecha_reactivacion = models.DateTimeField(null=True, blank=True)
@@ -290,7 +286,6 @@ class InventarioFlota(models.Model):
         related_name='unidades_dadas_de_baja'
     )
     notas = models.TextField(blank=True, default='')
-
     columnas_extra = models.JSONField(default=dict, blank=True)
     creado_en = models.DateTimeField(auto_now_add=True)
     actualizado_en = models.DateTimeField(auto_now=True)
@@ -303,25 +298,6 @@ class InventarioFlota(models.Model):
     def __str__(self):
         return f'Bus {self.bus_movil} - {self.placa} ({self.estado_operativo})'
 
-    def dar_de_baja(self, usuario=None, motivo=''):
-        """Marca la unidad como BAJA y sincroniza el campo legacy."""
-        from django.utils import timezone
-        self.estado_operativo = 'BAJA'
-        self.estado = 'BAJA'
-        self.motivo_baja = motivo or self.motivo_baja
-        self.fecha_baja = timezone.now()
-        self.dado_de_baja_por = usuario
-        self.save()
-
-    def reactivar(self, usuario=None, notas=''):
-        """Reactiva la unidad."""
-        from django.utils import timezone
-        self.estado_operativo = 'ACTIVO'
-        self.estado = 'OPERATIVO'
-        self.fecha_reactivacion = timezone.now()
-        if notas:
-            self.notas = (self.notas + "\n" + notas).strip()
-        self.save()
 
 
 class InventarioEE(models.Model):
