@@ -114,6 +114,57 @@ function IF({ label, value, onChange, placeholder = "" }) {
   );
 }
 
+
+function BajaReactivarButtons({ item }) {
+  const queryClient = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const estado = (item.estado_operativo || item.estado || "").toUpperCase();
+  const isBaja = estado === "BAJA";
+
+  const run = async (action) => {
+    if (action === "baja") {
+      const motivo = window.prompt("Motivo de baja (obligatorio):");
+      if (!motivo || !motivo.trim()) return;
+      setBusy(true);
+      try {
+        await apiClient.post(`/inventario-flota/${item.id}/dar_de_baja/`, { motivo: motivo.trim() });
+        queryClient.invalidateQueries({ queryKey: ["inventario-flota"] });
+      } catch (e) {
+        alert(e?.response?.data?.error || e?.message || "Error al dar de baja");
+      } finally {
+        setBusy(false);
+      }
+    } else {
+      if (!window.confirm(`¿Reactivar bus ${item.bus_movil}?`)) return;
+      setBusy(true);
+      try {
+        await apiClient.post(`/inventario-flota/${item.id}/reactivar/`, { notas: "Reactivado desde UI" });
+        queryClient.invalidateQueries({ queryKey: ["inventario-flota"] });
+      } catch (e) {
+        alert(e?.response?.data?.error || e?.message || "Error al reactivar");
+      } finally {
+        setBusy(false);
+      }
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-1.5">
+      {isBaja ? (
+        <button type="button" disabled={busy} onClick={() => run("reactivar")}
+          className="px-2 py-1 text-[10px] font-bold rounded-lg border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/15 disabled:opacity-50">
+          {busy ? "..." : "Reactivar"}
+        </button>
+      ) : (
+        <button type="button" disabled={busy} onClick={() => run("baja")}
+          className="px-2 py-1 text-[10px] font-bold rounded-lg border border-rose-500/40 text-rose-300 hover:bg-rose-500/15 disabled:opacity-50">
+          {busy ? "..." : "Baja"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function AddFlotaModal({ onClose }) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState({ bus_movil: "", placa: "", tipo_flota: "Torino", patio: "CURUNDU", estado: "OPERATIVO", estado_operativo: "ACTIVO" });
@@ -269,7 +320,7 @@ function EditFlotaModal({ item, onClose }) {
     placa: item.placa ?? "",
     tipo_flota: item.tipo_flota ?? "Torino",
     patio: item.patio ?? "CURUNDU",
-    estado: item.estado ?? "OPERATIVO"
+    estado: item.estado ?? "OPERATIVO", estado_operativo: item.estado_operativo ?? "ACTIVO"
   });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
@@ -297,7 +348,7 @@ function EditFlotaModal({ item, onClose }) {
             <SF label="Tipo de Flota" value={form.tipo_flota} onChange={v => set("tipo_flota", v)} options={TIPOS_FLOTA} />
             <SF label="Patio" value={form.patio} onChange={v => set("patio", v)} options={PATIOS.filter(p => p !== 'TODOS')} />
             <div className="col-span-2">
-              <SF label="Estado Operativo" value={form.estado} onChange={v => set("estado", v)} options={["OPERATIVO", "INOPERATIVO", "EN MANTENIMIENTO", "BAJA"]} />
+              <SF label="Estado Operativo" value={form.estado} onChange={v => set("estado", v)} options={["ACTIVO", "MANTENIMIENTO", "BAJA"]} />
             </div>
           </div>
           {mut.isError && (
