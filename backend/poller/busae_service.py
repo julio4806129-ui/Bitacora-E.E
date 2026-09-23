@@ -80,7 +80,7 @@ def _save_buses_to_db(buses_data):
             # Solo generar reporte si el bus está ACTIVO en Flota
             from buses.models import InventarioFlota
             flota = InventarioFlota.objects.filter(bus_movil=num).first()
-            if not flota or flota.estado.upper() not in ('OPERATIVO', 'ACTIVO'):
+            if not flota or getattr(flota, 'estado_operativo', flota.estado).upper() not in ('ACTIVO', 'OPERATIVO'):
                 # Unidad de baja o inexistente → no crear reporte
                 saved += 1
                 continue
