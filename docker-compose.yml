@@ -41,7 +41,7 @@ services:
     container_name: bitacora_backend
     restart: always
     env_file:
-      - .env.example
+      - .env
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
@@ -67,7 +67,7 @@ services:
     restart: always
     command: celery -A config worker --loglevel=info --concurrency=2
     env_file:
-      - .env.example
+      - .env
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
@@ -90,7 +90,7 @@ services:
     restart: always
     command: celery -A config beat --loglevel=info
     env_file:
-      - .env.example
+      - .env
     environment:
       DB_HOST: postgres
       DB_PORT: 5432

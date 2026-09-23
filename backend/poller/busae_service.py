@@ -23,7 +23,7 @@ _state = {
     'ciclo': 0,
 }
 
-GPS_SIN_SENAL = frozenset({'Offline', 'Stopped', 'No records', 'Active'})
+GPS_SIN_SENAL = frozenset({'Offline', 'No records'})
 
 
 def _fetch_raw():
@@ -75,6 +75,15 @@ def _save_buses_to_db(buses_data):
                 }
             )
             touched.append(num)
+
+
+            # Solo generar reporte si el bus está ACTIVO en Flota
+            from buses.models import InventarioFlota
+            flota = InventarioFlota.objects.filter(bus_movil=num).first()
+            if not flota or flota.estado.upper() not in ('OPERATIVO', 'ACTIVO'):
+                # Unidad de baja o inexistente → no crear reporte
+                saved += 1
+                continue
 
             if is_offline:
                 if UnidadFueraServicio.objects.filter(bus_movil=num, estado='ACTIVO').exists():

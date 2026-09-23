@@ -278,14 +278,40 @@ class ReportePendienteViewSet(viewsets.ModelViewSet):
     permission_classes = [EsTecnico]
 
     def get_queryset(self):
+        """
+        Solo pendientes de buses ACTIVO en Flota.
+        Filtros: patio, bus_movil, search, estado_gps
+        """
+        from buses.models import InventarioFlota
         qs = ReportePendiente.objects.filter(estado='PENDIENTE')
+
+        # Excluir buses de BAJA en Flota
+        buses_baja = InventarioFlota.objects.filter(
+            estado_operativo='BAJA'
+        ).values_list('bus_movil', flat=True)
+        qs = qs.exclude(bus_movil__in=buses_baja)
+
         patio = self.request.query_params.get('patio')
         bus = self.request.query_params.get('bus_movil')
+        search = self.request.query_params.get('search') or self.request.query_params.get('q')
+        estado_gps = self.request.query_params.get('estado_gps')
+
         if patio:
             qs = qs.filter(patio__icontains=patio)
         if bus:
             qs = qs.filter(bus_movil=bus)
-        return qs
+        if search:
+            from django.db.models import Q
+            qs = qs.filter(
+                Q(bus_movil__icontains=search) |
+                Q(patio__icontains=search) |
+                Q(diagnostico__icontains=search) |
+                Q(report_id__icontains=search)
+            )
+        if estado_gps:
+            qs = qs.filter(estado_gps__iexact=estado_gps)
+
+        return qs.order_by('-creado_en')
 
 class EEMovilViewSet(viewsets.ModelViewSet):
     queryset = EEMovil.objects.all().order_by('bus_movil')
@@ -318,6 +344,22 @@ class RegistroBitacoraViewSet(viewsets.ModelViewSet):
             return Response({'status': 'error', 'message': 'El número de bus es requerido.'}, status=status.HTTP_400_BAD_REQUEST)
         if not str(data.get('respuesta_tecnica') or '').strip():
             return Response({'status': 'error', 'message': 'La respuesta técnica es requerida para cerrar la atención.'}, status=status.HTTP_400_BAD_REQUEST)
+        # Validar que el bus esté en Flota y activo (salvo modo proactivo forzado)
+        from buses.models import InventarioFlota
+        flota = InventarioFlota.objects.filter(bus_movil=int(bus_movil)).first()
+        modo_proactivo = str(data.get("modo") or data.get("tipo_atencion") or "").upper() in (
+            "PROACTIVO", "PREVENTIVO", "REVISION PREVENTIVA", "PROACTIVA"
+        )
+        if flota and flota.estado_operativo == "BAJA" and not modo_proactivo:
+            return Response({
+                "status": "error",
+                "message": f"Bus {bus_movil} está de BAJA. Use modo proactivo o reactivelo primero."
+            }, status=status.HTTP_400_BAD_REQUEST)
+        if not flota and not modo_proactivo:
+            # Permitir atención proactiva aunque no esté en flota (se puede crear después)
+            pass
+
+
 
         source = data.get('source', 'reportes')
         report_id = data.get('reportId') or data.get('report_id')
@@ -550,7 +592,7 @@ class RegistroBitacoraViewSet(viewsets.ModelViewSet):
 
                 start_dt, end_dt = get_effective_shift_range()
                 nuevo_contador = RegistroBitacora.objects.filter(
-                    tecnico=request.user,
+                    tecnico=tecnico_user,
                     timestamp__gte=start_dt,
                     timestamp__lt=end_dt
                 ).count()
@@ -1887,6 +1929,96 @@ class InventarioFlotaViewSet(viewsets.ModelViewSet):
 # =============================================================
 # INVENTARIO DE EQUIPAMIENTO EMBARCADO (E.E.)
 # =============================================================
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        estado = self.request.query_params.get("estado_operativo")
+        patio = self.request.query_params.get("patio")
+        search = self.request.query_params.get("search") or self.request.query_params.get("q")
+
+        if estado:
+            qs = qs.filter(estado_operativo=estado.upper())
+        if patio:
+            qs = qs.filter(patio__icontains=patio)
+        if search:
+            from django.db.models import Q
+            qs = qs.filter(
+                Q(bus_movil__icontains=search) |
+                Q(placa__icontains=search) |
+                Q(patio__icontains=search)
+            )
+        return qs.order_by("bus_movil")
+
+    @action(detail=True, methods=["post"])
+    def dar_de_baja(self, request, pk=None):
+        """
+        POST /api/inventario-flota/{id}/dar_de_baja/
+        Body: { "motivo": "texto opcional" }
+        """
+        unidad = self.get_object()
+        motivo = str(request.data.get("motivo") or "").strip()
+        if unidad.estado_operativo == "BAJA":
+            return Response(
+                {"error": "La unidad ya está de baja."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        unidad.dar_de_baja(usuario=request.user, motivo=motivo)
+        return Response({
+            "status": "ok",
+            "message": f"Bus {unidad.bus_movil} dado de baja.",
+            "bus_movil": unidad.bus_movil,
+            "estado_operativo": unidad.estado_operativo,
+            "motivo_baja": unidad.motivo_baja,
+            "fecha_baja": unidad.fecha_baja,
+        })
+
+    @action(detail=True, methods=["post"])
+    def reactivar(self, request, pk=None):
+        """
+        POST /api/inventario-flota/{id}/reactivar/
+        Body: { "notas": "texto opcional" }
+        """
+        unidad = self.get_object()
+        notas = str(request.data.get("notas") or "").strip()
+        if unidad.estado_operativo == "ACTIVO":
+            return Response(
+                {"error": "La unidad ya está activa."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        unidad.reactivar(usuario=request.user, notas=notas)
+        return Response({
+            "status": "ok",
+            "message": f"Bus {unidad.bus_movil} reactivado.",
+            "bus_movil": unidad.bus_movil,
+            "estado_operativo": unidad.estado_operativo,
+            "fecha_reactivacion": unidad.fecha_reactivacion,
+        })
+
+    @action(detail=False, methods=["get"])
+    def estadisticas(self, request):
+        """
+        GET /api/inventario-flota/estadisticas/
+        """
+        from django.db.models import Count
+        total = InventarioFlota.objects.count()
+        por_estado = (
+            InventarioFlota.objects
+            .values("estado_operativo")
+            .annotate(cantidad=Count("id"))
+            .order_by("estado_operativo")
+        )
+        por_patio = (
+            InventarioFlota.objects
+            .values("patio")
+            .annotate(cantidad=Count("id"))
+            .order_by("-cantidad")[:15]
+        )
+        return Response({
+            "total": total,
+            "por_estado": list(por_estado),
+            "por_patio": list(por_patio),
+        })
+
 
 class InventarioEEViewSet(viewsets.ModelViewSet):
     queryset = InventarioEE.objects.all()
