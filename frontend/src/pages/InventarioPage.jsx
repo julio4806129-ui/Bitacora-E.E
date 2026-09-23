@@ -50,7 +50,7 @@ const DEFAULT_COLUMNS_FLOTA = [
   { key: 'placa', label: 'PLACA', visible: true, width: 'w-28', align: 'left', source: 'flota' },
   { key: 'tipo_flota', label: 'TIPO DE FLOTA', visible: true, width: 'w-36', align: 'left', source: 'flota' },
   { key: 'patio', label: 'PATIO', visible: true, width: 'w-32', align: 'left', source: 'flota' },
-  { key: 'estado', label: 'ESTADO', visible: true, width: 'w-28', align: 'left', source: 'flota' },
+  { key: 'estado_operativo', label: 'ESTADO', visible: true, width: 'w-28', align: 'left', source: 'flota' },
 ];
 
 const DEFAULT_COLUMNS_EE = [
@@ -116,7 +116,7 @@ function IF({ label, value, onChange, placeholder = "" }) {
 
 function AddFlotaModal({ onClose }) {
   const queryClient = useQueryClient();
-  const [form, setForm] = useState({ bus_movil: "", placa: "", tipo_flota: "Torino", patio: "CURUNDU", estado: "OPERATIVO" });
+  const [form, setForm] = useState({ bus_movil: "", placa: "", tipo_flota: "Torino", patio: "CURUNDU", estado: "OPERATIVO", estado_operativo: "ACTIVO" });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   
   const mut = useMutation({
@@ -145,7 +145,7 @@ function AddFlotaModal({ onClose }) {
             <SF label="Tipo de Flota" value={form.tipo_flota} onChange={v=>set("tipo_flota", v)} options={TIPOS_FLOTA} />
             <SF label="Patio" value={form.patio} onChange={v=>set("patio", v)} options={PATIOS.filter(p=>p!=='TODOS')} />
             <div className="col-span-2">
-              <SF label="Estado Operativo" value={form.estado} onChange={v=>set("estado", v)} options={["OPERATIVO", "INOPERATIVO", "EN MANTENIMIENTO", "BAJA"]} />
+              <SF label="Estado Operativo" value={form.estado_operativo || form.estado} onChange={v=>{ set("estado_operativo", v); set("estado", v === "ACTIVO" ? "OPERATIVO" : v); }} options={["ACTIVO", "MANTENIMIENTO", "BAJA"]} />
             </div>
           </div>
         </div>

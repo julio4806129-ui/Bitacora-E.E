@@ -2478,7 +2478,7 @@ class UnidadFueraServicioViewSet(viewsets.ModelViewSet):
         with transaction.atomic():
             instancia = serializer.save(usuario_registro=self.request.user)
             # Sincronizar estado en InventarioFlota y EEMovil
-            InventarioFlota.objects.filter(bus_movil=instancia.bus_movil).update(estado='FUERA_SERVICIO')
+            InventarioFlota.objects.filter(bus_movil=instancia.bus_movil).update(estado='BAJA', estado_operativo='BAJA')
             EEMovil.objects.filter(bus_movil=instancia.bus_movil).update(estado='FUERA_SERVICIO')
 
             AuditService.registrar(
@@ -2514,7 +2514,7 @@ class UnidadFueraServicioViewSet(viewsets.ModelViewSet):
                     'fecha_inicio': timezone.now(),
                 }
             )
-            InventarioFlota.objects.filter(bus_movil=bus_num).update(estado='FUERA_SERVICIO')
+            InventarioFlota.objects.filter(bus_movil=bus_num).update(estado='BAJA', estado_operativo='BAJA')
             EEMovil.objects.filter(bus_movil=bus_num).update(estado='FUERA_SERVICIO')
             AuditService.registrar(
                 accion='CREATE' if created else 'UPDATE',
@@ -2541,7 +2541,7 @@ class UnidadFueraServicioViewSet(viewsets.ModelViewSet):
             unidad.save()
 
             # Restaurar estado en InventarioFlota y EEMovil
-            InventarioFlota.objects.filter(bus_movil=unidad.bus_movil).update(estado='OPERATIVO')
+            InventarioFlota.objects.filter(bus_movil=unidad.bus_movil).update(estado='OPERATIVO', estado_operativo='ACTIVO')
             EEMovil.objects.filter(bus_movil=unidad.bus_movil).update(estado='OPERATIVO')
 
             AuditService.registrar(
