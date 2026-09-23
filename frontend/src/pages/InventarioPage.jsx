@@ -632,6 +632,7 @@ function TabFlota({ visibleColumns, renderCell }) {
                       >
                         <Trash2 className="w-3.5 h-3.5"/>
                       </button>
+                      <BajaReactivarButtons item={r} />
                     </div>
                   </td>
                 </tr>
