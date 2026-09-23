@@ -45,12 +45,16 @@ export const getAlignClass = (align) => {
 };
 
 const DEFAULT_COLUMNS_FLOTA = [
-  { key: 'id', label: 'ID ÚNICO', visible: true, width: 'w-20', align: 'left', source: 'flota' },
   { key: 'bus_movil', label: 'N° BUS', visible: true, width: 'w-24', align: 'left', source: 'flota' },
   { key: 'placa', label: 'PLACA', visible: true, width: 'w-28', align: 'left', source: 'flota' },
-  { key: 'tipo_flota', label: 'TIPO DE FLOTA', visible: true, width: 'w-36', align: 'left', source: 'flota' },
-  { key: 'patio', label: 'PATIO', visible: true, width: 'w-32', align: 'left', source: 'flota' },
-  { key: 'estado_operativo', label: 'ESTADO', visible: true, width: 'w-28', align: 'left', source: 'flota' },
+  { key: 'tipo_flota', label: 'TIPO', visible: true, width: 'w-28', align: 'left', source: 'flota' },
+  { key: 'estado_operativo', label: 'FLOTA', visible: true, width: 'w-24', align: 'center', source: 'flota' },
+  { key: 'estado_gps', label: 'GPS (BUSAE)', visible: true, width: 'w-32', align: 'center', source: 'flota' },
+  { key: 'sin_senal', label: 'SIN SEÑAL', visible: true, width: 'w-24', align: 'center', source: 'flota' },
+  { key: 'patio_genesis', label: 'PATIO', visible: true, width: 'w-32', align: 'left', source: 'flota' },
+  { key: 'hora_entrada', label: 'HORA ENT.', visible: true, width: 'w-24', align: 'center', source: 'flota' },
+  { key: 'estado_genesis', label: 'ESTADO GEN.', visible: true, width: 'w-28', align: 'center', source: 'flota' },
+  { key: 'ultima_transmision', label: 'ÚLT. GPS', visible: true, width: 'w-36', align: 'left', source: 'flota' },
 ];
 
 const DEFAULT_COLUMNS_EE = [
@@ -542,7 +546,7 @@ function TabFlota({ visibleColumns, renderCell }) {
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["inventario-flota"],
-    queryFn: () => apiClient.get("/inventario-flota/"),
+    queryFn: () => apiClient.get("/inventario-flota/", { params: { page_size: 2000 } }),
   });
 
   const delMut = useMutation({
@@ -787,7 +791,31 @@ export default function InventarioPage() {
       case 'patio':
         return <td key={col.key} className={`px-4 py-3 text-slate-300 ${alignClass} ${col.width}`}>{row.patio}</td>;
       case 'estado':
-        return <td key={col.key} className={`px-4 py-3 ${alignClass} ${col.width}`}><span className={`inline-flex items-center border text-[10px] font-mono font-bold px-2.5 py-1 rounded-full whitespace-nowrap shadow-sm ${row.estado === "OPERATIVO" ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30" : "bg-rose-500/15 text-rose-300 border-rose-500/30"}`}>{row.estado}</span></td>;
+      case 'estado_operativo': {
+        const eo = row.estado_operativo || row.estado || '';
+        const okE = eo === 'ACTIVO' || eo === 'OPERATIVO';
+        return <td key={col.key} className={`px-4 py-3 ${alignClass} ${col.width}`}><span className={`inline-flex items-center border text-[10px] font-mono font-bold px-2.5 py-1 rounded-full ${okE ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30" : "bg-rose-500/15 text-rose-300 border-rose-500/30"}`}>{eo || '—'}</span></td>;
+      }
+      case 'estado_gps': {
+        const g = row.estado_gps || 'Sin datos';
+        const bad = row.sin_senal || /offline|no record|off/i.test(String(g));
+        return <td key={col.key} className={`px-4 py-3 ${alignClass} ${col.width}`}><span className={`inline-flex items-center border text-[10px] font-mono font-bold px-2.5 py-1 rounded-full ${bad ? "bg-rose-500/15 text-rose-300 border-rose-500/30" : "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"}`}>{g}</span></td>;
+      }
+      case 'sin_senal':
+        return <td key={col.key} className={`px-4 py-3 ${alignClass} ${col.width}`}>{row.sin_senal ? <span className="text-rose-400 font-bold">SÍ</span> : <span className="text-emerald-400">No</span>}</td>;
+      case 'patio_genesis':
+      case 'patio':
+        return <td key={col.key} className={`px-4 py-3 text-slate-300 ${alignClass} ${col.width}`}>{row.patio_genesis || row.patio || '—'}</td>;
+      case 'hora_entrada':
+        return <td key={col.key} className={`px-4 py-3 font-mono text-slate-400 ${alignClass} ${col.width}`}>{row.hora_entrada || '—'}</td>;
+      case 'estado_genesis':
+        return <td key={col.key} className={`px-4 py-3 ${alignClass} ${col.width}`}><span className="text-[10px] font-mono text-slate-300">{row.estado_genesis || '—'}</span></td>;
+      case 'ultima_transmision': {
+        const t = row.ultima_transmision;
+        let label = '—';
+        if (t) { try { label = new Date(t).toLocaleString('es-PA'); } catch { label = String(t); } }
+        return <td key={col.key} className={`px-4 py-3 font-mono text-[11px] text-slate-400 ${alignClass} ${col.width}`}>{label}</td>;
+      }
       default:
         return null;
     }

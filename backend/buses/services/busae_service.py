@@ -171,7 +171,7 @@ class BusaeService:
                 )
                 saved_count += 1
 
-                if str(b.estado_gps).upper() in ('OFF', 'OFFLINE', 'NO RECORDS', 'STOPPED'):
+                if str(b.estado_gps).upper() in ('OFFLINE', 'NO RECORDS', 'STOPPED', 'ACTIVE'):
                     # Nota: ajusta la lista según qué estados deban generar reporte
                     genesis = latest_genesis(b.numero)
                     patio_entrada, hora_entrada = genesis_cross_fields(genesis)

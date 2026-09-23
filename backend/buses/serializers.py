@@ -237,10 +237,80 @@ class TareaExportacionSerializer(serializers.ModelSerializer):
         read_only_fields = ('estado', 'archivo_resultado', 'error_mensaje', 'creado_en', 'completado_en', 'usuario')
 
 
+
 class InventarioFlotaSerializer(serializers.ModelSerializer):
+    """Catálogo Flota + telemetría BUSAE + operación Genesis (solo lectura)."""
+    estado_gps = serializers.SerializerMethodField()
+    sin_senal = serializers.SerializerMethodField()
+    ultima_transmision = serializers.SerializerMethodField()
+    velocidad = serializers.SerializerMethodField()
+    patio_genesis = serializers.SerializerMethodField()
+    hora_entrada = serializers.SerializerMethodField()
+    estado_genesis = serializers.SerializerMethodField()
+
     class Meta:
         model = InventarioFlota
         fields = '__all__'
+
+    def _busae(self, obj):
+        cache = self.context.get('_busae_map')
+        if cache is not None:
+            return cache.get(obj.bus_movil)
+        from buses.models import DatosBusae
+        return DatosBusae.objects.filter(bus_movil=obj.bus_movil).first()
+
+    def _genesis(self, obj):
+        cache = self.context.get('_genesis_map')
+        if cache is not None:
+            return cache.get(obj.bus_movil)
+        from buses.models import DatosGenesis
+        return DatosGenesis.objects.filter(bus_movil=obj.bus_movil).order_by('-sincronizado_en').first()
+
+    def get_estado_gps(self, obj):
+        b = self._busae(obj)
+        return (b.estado if b else '') or 'Sin datos'
+
+    def get_sin_senal(self, obj):
+        from buses.catalogos import GPS_SIN_TRANSMISION
+        b = self._busae(obj)
+        if not b:
+            return True
+        return (b.estado or '') in GPS_SIN_TRANSMISION
+
+    def get_ultima_transmision(self, obj):
+        b = self._busae(obj)
+        if not b:
+            return None
+        ts = getattr(b, 'ultima_transmision', None) or getattr(b, 'fecha_hora_gps', None)
+        return ts.isoformat() if ts and hasattr(ts, 'isoformat') else (str(ts) if ts else None)
+
+    def get_velocidad(self, obj):
+        b = self._busae(obj)
+        return getattr(b, 'velocidad', None) if b else None
+
+    def get_patio_genesis(self, obj):
+        g = self._genesis(obj)
+        if g and getattr(g, 'patio_ubicacion', None):
+            return g.patio_ubicacion
+        return obj.patio or ''
+
+    def get_hora_entrada(self, obj):
+        g = self._genesis(obj)
+        if not g or not getattr(g, 'hora_entrada', None):
+            return ''
+        he = g.hora_entrada
+        return he.strftime('%H:%M:%S') if hasattr(he, 'strftime') else str(he)
+
+    def get_estado_genesis(self, obj):
+        g = self._genesis(obj)
+        if not g:
+            return ''
+        # Preferir campo explícito; si no, inferir de datos típicos
+        for attr in ('estado_bus', 'estado', 'estado_operativo'):
+            val = getattr(g, attr, None)
+            if val:
+                return str(val)
+        return 'Operativo' if g else ''
 
 
 class InventarioEESerializer(serializers.ModelSerializer):

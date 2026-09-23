@@ -1857,6 +1857,35 @@ class InventarioFlotaViewSet(viewsets.ModelViewSet):
     serializer_class = InventarioFlotaSerializer
     permission_classes = [permissions.IsAuthenticated]
 
+    def list(self, request, *args, **kwargs):
+        """Lista Flota enriquecida con BUSAE/Genesis (mapas en 2 queries)."""
+        from buses.models import DatosBusae, DatosGenesis
+        queryset = self.filter_queryset(self.get_queryset())
+        page_size = request.query_params.get('page_size') or request.query_params.get('pageSize')
+        if page_size:
+            try:
+                ps = int(page_size)
+                if ps > 0:
+                    self.paginator.page_size = min(ps, 3000) if self.paginator else None
+            except (TypeError, ValueError):
+                pass
+        page = self.paginate_queryset(queryset)
+        objs = page if page is not None else list(queryset)
+        bus_ids = [o.bus_movil for o in objs]
+        busae_map = {b.bus_movil: b for b in DatosBusae.objects.filter(bus_movil__in=bus_ids)}
+        genesis_map = {}
+        for g in DatosGenesis.objects.filter(bus_movil__in=bus_ids).order_by('sincronizado_en'):
+            genesis_map[g.bus_movil] = g
+        ser = self.get_serializer(objs, many=True, context={
+            **self.get_serializer_context(),
+            '_busae_map': busae_map,
+            '_genesis_map': genesis_map,
+        })
+        if page is not None:
+            return self.get_paginated_response(ser.data)
+        return Response(ser.data)
+
+
     @action(detail=False, methods=['post'], parser_classes=[MultiPartParser, FormParser])
     def carga_masiva(self, request):
         archivo = request.FILES.get('archivo')
